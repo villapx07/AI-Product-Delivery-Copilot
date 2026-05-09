@@ -206,10 +206,13 @@ interface SSEEvent {
   data: string
 }
 
+const DEBUG = true
+
 function parseSSE(chunk: string): SSEEvent | null {
   const eventMatch = chunk.match(/^event: (.+)/)
   const dataMatch = chunk.match(/^data: (.+)/)
   if (!dataMatch) return null
+  if (DEBUG) console.log('[SSE]', eventMatch ? eventMatch[1] : 'message', '→', dataMatch[1].slice(0, 80))
   return {
     event: eventMatch ? eventMatch[1] : 'message',
     data: dataMatch[1],
@@ -276,20 +279,20 @@ export default function WorkspacePage() {
     model: 'gpt-4o',
   })
 
-  // ── Toast notifications ─────────────────────────────────────────
-  type Toast = { id: string; message: string; type: 'error' | 'success' | 'info' }
-  const [toasts, setToasts] = React.useState<Toast[]>([])
-  const addToast = (message: string, type: Toast['type'] = 'info') => {
-    const id = `toast-${Date.now()}`
-    setToasts((prev) => [...prev, { id, message, type }])
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500)
-  }
-  const removeToast = (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id))
-  const handleInputsChange = (field: keyof DiscoveryInputs, value: string | string[]) => {
-    setInputs((prev) => ({ ...prev, [field]: value }))
-  }
+const DEBUG = true
 
-  // ── SSE streaming handler ──────────────────────────────────────
+function parseSSE(chunk: string): SSEEvent | null {
+  const eventMatch = chunk.match(/^event: (.+)/)
+  const dataMatch = chunk.match(/^data: (.+)/)
+  if (!dataMatch) return null
+  if (DEBUG) console.log('[SSE]', eventMatch ? eventMatch[1] : 'message', '→', dataMatch[1].slice(0, 80))
+  return {
+    event: eventMatch ? eventMatch[1] : 'message',
+    data: dataMatch[1],
+  }
+}
+
+// ── SSE streaming handler ──────────────────────────────────────
   const handleGenerate = React.useCallback(async () => {
     if (!inputs.feature_title.trim() || !inputs.business_objective.trim()) {
       addToast('Please fill in Feature Title and Business Objective before generating.', 'error')
@@ -311,6 +314,7 @@ export default function WorkspacePage() {
     let buffer = ''
 
     try {
+      if (DEBUG) console.log('[Generate] Starting fetch to /api/generate', inputs.feature_title, inputs.business_objective)
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -326,6 +330,7 @@ export default function WorkspacePage() {
           file_names: files.map((f) => f.name),
         }),
       })
+      if (DEBUG) console.log('[Generate] Response status:', response.status, 'OK:', response.ok)
 
       if (!response.ok) {
         const errText = await response.text().catch(() => response.statusText)
@@ -344,50 +349,65 @@ export default function WorkspacePage() {
       }
 
       const decoder = new TextDecoder()
+      let currentEvent = 'message'
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
 
-        for (const rawLine of lines) {
-          const ev = parseSSE(rawLine.trim())
+        // Split on blank lines (\n\n) to get complete SSE events
+        let eventEnd: number
+        while ((eventEnd = buffer.indexOf('\n\n')) !== -1) {
+          const rawEvent = buffer.slice(0, eventEnd)
+          buffer = buffer.slice(eventEnd + 2)
+
+          // Within a complete event, find the event: and data: lines
+          // Each line in the event is separated by a single \n
+          const eventLineIdx = rawEvent.indexOf('\nevent:')
+          const dataLineIdx = rawEvent.indexOf('\ndata:')
+          const lastDataIdx = rawEvent.lastIndexOf('\ndata:')
+
+          if (lastDataIdx === -1) continue
+
+          const ev = parseSSE(rawEvent)
           if (!ev || !ev.data) continue
 
           if (ev.event === 'module_start') {
+            if (DEBUG) console.log('[SSE→state] module_start:', ev.data)
             setGeneratingModule(ev.data as GenerationModule)
           } else if (ev.event === 'module_complete') {
+            if (DEBUG) console.log('[SSE→state] module_complete:', ev.data.slice(0, 60))
             try {
               const payload = JSON.parse(ev.data)
-              if (payload.epic_map) {
-                setEpicMap(payload.epic_map)
-                setActiveTab('epic')
-              }
-              if (payload.user_stories) {
-                setUserStories(payload.user_stories)
-              }
-              if (payload.qa_scenarios) {
-                setQaScenarios(payload.qa_scenarios)
-              }
-              if (payload.analytics_events) {
-                setAnalyticsEvents(payload.analytics_events)
-              }
-              if (payload.risks) {
-                setRisks(payload.risks)
-              }
-              if (payload.reviewer_items) {
-                setReviewItems(payload.reviewer_items)
-              }
+              if (payload.epic_map) { setEpicMap(payload.epic_map); setActiveTab('epic') }
+              if (payload.user_stories) setUserStories(payload.user_stories)
+              if (payload.qa_scenarios) setQaScenarios(payload.qa_scenarios)
+              if (payload.analytics_events) setAnalyticsEvents(payload.analytics_events)
+              if (payload.risks) setRisks(payload.risks)
+              if (payload.reviewer_items) setReviewItems(payload.reviewer_items)
             } catch (e) {
-              // ignore malformed JSON in event
+              if (DEBUG) console.warn('[SSE→state] JSON parse error:', e)
             }
           } else if (ev.event === 'error') {
+            if (DEBUG) console.warn('[SSE→state] error event:', ev.data)
             addToast(`Generation error: ${ev.data}`, 'error')
           } else if (ev.event === 'complete') {
-            addToast('✅ All artifacts generated successfully!', 'success')
+            if (DEBUG) console.log('[SSE→state] complete')
+            addToast('All artifacts generated successfully!', 'success')
+          } else if (ev.event === 'message' && ev.data.startsWith('{')) {
+            // Fallback: events without explicit event: line, try to parse as JSON
+            if (DEBUG) console.log('[SSE→state] message (no event type):', ev.data.slice(0, 60))
+            try {
+              const payload = JSON.parse(ev.data)
+              if (payload.epic_map) { setEpicMap(payload.epic_map); setActiveTab('epic') }
+              if (payload.user_stories) setUserStories(payload.user_stories)
+              if (payload.qa_scenarios) setQaScenarios(payload.qa_scenarios)
+              if (payload.analytics_events) setAnalyticsEvents(payload.analytics_events)
+              if (payload.risks) setRisks(payload.risks)
+              if (payload.reviewer_items) setReviewItems(payload.reviewer_items)
+            } catch (e) { /* ignore */ }
           }
         }
       }

@@ -49,6 +49,8 @@ export function DiscoveryForm({ inputs, onChange, onGenerate, isGenerating, canG
     onChange('impacted_teams', updated)
   }
 
+  console.log('[DiscoveryForm] canGenerate:', canGenerate, 'isGenerating:', isGenerating, 'feature_title:', inputs.feature_title)
+
   return (
     <div className="flex flex-col gap-4">
       <Input
@@ -121,7 +123,7 @@ export function DiscoveryForm({ inputs, onChange, onGenerate, isGenerating, canG
       </div>
 
       <Button
-        onClick={onGenerate}
+        onClick={() => { console.log('[Button] clicked! canGenerate:', canGenerate); onGenerate() }}
         disabled={!canGenerate}
         loading={isGenerating}
         size="lg"

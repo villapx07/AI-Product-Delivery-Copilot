@@ -1,6 +1,8 @@
 import os
 import json
+import re
 from typing import AsyncGenerator, Optional
+import httpx
 from openai import AsyncOpenAI
 
 # ── MiniMax endpoint defaults ──────────────────────────────────────
@@ -42,7 +44,15 @@ _client: Optional[AsyncOpenAI] = None
 def _get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = AsyncOpenAI(api_key=_get_api_key(), base_url=_get_base_url())
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(180.0, connect=15.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=5),
+        )
+        _client = AsyncOpenAI(
+            api_key=_get_api_key(),
+            base_url=_get_base_url(),
+            http_client=_http_client,
+        )
     return _client
 
 
@@ -108,8 +118,7 @@ async def generate_json(
     raw = response.choices[0].message.content
     if raw:
         # Strip Claude-style <thinking> blocks
-        import re
-        cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+        cleaned = re.sub(r"<think>.*?", "", raw, flags=re.DOTALL).strip()
 
         # Strip markdown code fences (```json ... ```)
         fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned, flags=re.DOTALL)
