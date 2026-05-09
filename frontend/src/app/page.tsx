@@ -294,9 +294,11 @@ export default function WorkspacePage() {
 
   const DEBUG = true
 
-  function parseSSE(chunk: string): SSEEvent | null {
-    const eventMatch = chunk.match(/^event: (.+)/)
-    const dataMatch = chunk.match(/^data: (.+)/)
+  function parseSSE(rawEvent: string): SSEEvent | null {
+    // Extract event type and data from an already-separated SSE event block
+    // (the block has already been split by \n\n before calling this)
+    const eventMatch = rawEvent.match(/(?:^|\n)event: (.+)/)
+    const dataMatch = rawEvent.match(/(?:^|\n)data: (.+)/s)
     if (!dataMatch) return null
     if (DEBUG) console.log('[SSE]', eventMatch ? eventMatch[1] : 'message', '→', dataMatch[1].slice(0, 80))
     return {
