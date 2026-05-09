@@ -298,7 +298,8 @@ export default function WorkspacePage() {
     // Extract event type and data from an already-separated SSE event block
     // (the block has already been split by \n\n before calling this)
     const eventMatch = rawEvent.match(/(?:^|\n)event: (.+)/)
-    const dataMatch = rawEvent.match(/(?:^|\n)data: (.+)/s)
+
+    const dataMatch = rawEvent.match(/(?:^|\n)data: ([\s\S]+?)(?=\n(?:event|data)|$)/)
     if (!dataMatch) return null
     if (DEBUG) console.log('[SSE]', eventMatch ? eventMatch[1] : 'message', '→', dataMatch[1].slice(0, 80))
     return {
