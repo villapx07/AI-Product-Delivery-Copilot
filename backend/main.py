@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from models import GenerateRequest
 from config_manager import load_config, save_config, apply_config, DEFAULT_CONFIG
+from session_store import create_session, get_session, list_sessions, update_session_artifacts
 from prompt_orchestrator import (
     build_epic_prompt,
     build_user_stories_prompt,
@@ -82,6 +83,54 @@ async def update_config(update: ConfigUpdate):
     apply_config(saved)
     print(f"⚙️  Config updated — provider={saved['provider']} model={saved['model']}")
     return {"status": "ok", "config": saved}
+
+
+# ── Session endpoints ─────────────────────────────────────────────
+class GenerateRequestWithSession(BaseModel):
+    session_id: Optional[str] = None
+    feature_title: str
+    business_objective: str
+    problem_statement: Optional[str] = ""
+    success_metrics: Optional[str] = ""
+    constraints: Optional[str] = ""
+    assumptions: Optional[str] = ""
+    impacted_teams: list[str] = []
+    uploaded_files: list[str] = []
+    file_names: list[str] = []
+
+
+@app.get("/api/sessions")
+async def get_sessions():
+    """List all sessions, newest first."""
+    sessions = list_sessions(limit=30)
+    return {"sessions": sessions}
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session_by_id(session_id: str):
+    """Get a single session with all artifacts."""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@app.post("/api/sessions")
+async def start_session(req: GenerateRequestWithSession):
+    """Create a new session (pre-generate)."""
+    session = create_session(
+        feature_title=req.feature_title,
+        business_objective=req.business_objective,
+        inputs={
+            "problem_statement": req.problem_statement,
+            "success_metrics": req.success_metrics,
+            "constraints": req.constraints,
+            "assumptions": req.assumptions,
+            "impacted_teams": req.impacted_teams,
+            "file_names": req.file_names,
+        },
+    )
+    return {"session_id": session["id"], **session}
 
 
 # ── SSE generation pipeline ───────────────────────────────────────
@@ -193,17 +242,32 @@ def load_prompt(name: str) -> str:
         return ""
 
 
-async def event_generator(req: GenerateRequest) -> AsyncGenerator[str, None]:
-    """Convert generation events to SSE format."""
+async def event_generator(req: GenerateRequest, on_complete=None) -> AsyncGenerator[str, None]:
+    """Convert generation events to SSE format. Calls on_complete with all artifacts at end."""
+    all_artifacts = {}
     async for event in generate_sse(req):
         yield f"event: {event['event']}\ndata: {event['data']}\n\n"
+        if event['event'] == 'complete' and on_complete:
+            try:
+                on_complete(json.loads(event['data']))
+            except Exception:
+                pass
 
 
 @app.post("/api/generate")
 async def generate(request: GenerateRequest):
-    """Main generation endpoint. Streams SSE events as each module completes."""
+    """
+    Main generation endpoint. Streams SSE events as each module completes.
+    Optionally include session_id in body to persist artifacts on completion.
+    """
+    session_id = getattr(request, 'session_id', None) or (request.uploaded_files and len(request.uploaded_files) > 0 and request.file_names[0])
+
+    def _save_artifacts(artifacts: dict) -> None:
+        if session_id:
+            update_session_artifacts(session_id, artifacts)
+
     return StreamingResponse(
-        event_generator(request),
+        event_generator(request, on_complete=_save_artifacts),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
