@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from models import GenerateRequest
 from config_manager import load_config, save_config, apply_config, DEFAULT_CONFIG
 from session_store import create_session, get_session, list_sessions, update_session_artifacts
+from export_utils import export_markdown, export_json, export_jira_csv
 from prompt_orchestrator import (
     build_epic_prompt,
     build_user_stories_prompt,
@@ -131,6 +132,37 @@ async def start_session(req: GenerateRequestWithSession):
         },
     )
     return {"session_id": session["id"], **session}
+
+
+# ── Export endpoints ─────────────────────────────────────────────
+@app.get("/api/export/{session_id}/{format}")
+async def export_session(session_id: str, format: str):
+    """
+    Export session artifacts in the given format.
+    format: 'markdown' | 'json' | 'jira'
+    """
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    artifacts = {}
+    if session.get("artifacts_json"):
+        try:
+            artifacts = json.loads(session["artifacts_json"])
+        except Exception:
+            pass
+
+    feature_title = session.get("feature_title", "")
+
+    if format == "markdown":
+        content = export_markdown(artifacts, feature_title)
+        return {"content": content, "mime": "text/markdown"}
+    elif format == "json":
+        return {"content": export_json(artifacts, feature_title), "mime": "application/json"}
+    elif format == "jira":
+        return {"content": export_jira_csv(artifacts), "mime": "text/csv"}
+    else:
+        raise HTTPException(status_code=400, detail="Unknown format. Use: markdown, json, jira")
 
 
 # ── SSE generation pipeline ───────────────────────────────────────
