@@ -247,6 +247,23 @@ export default function WorkspacePage() {
   const [generatingModule, setGeneratingModule] = React.useState<GenerationModule | null>(null)
   const [isRegenerating, setIsRegenerating] = React.useState<Record<string, boolean>>({})
 
+  // ── Config fetch on mount ─────────────────────────────────────────
+  React.useEffect(() => {
+    fetch('/api/config')
+      .then((r) => r.json())
+      .then((cfg) => {
+        if (cfg.provider && cfg.api_key) {
+          setLlmConfig({
+            provider: cfg.provider,
+            apiKey: cfg.api_key,
+            baseUrl: cfg.base_url || '',
+            model: cfg.model || (cfg.provider === 'minimax' ? 'MiniMax-Text-01' : 'gpt-4o'),
+          })
+        }
+      })
+      .catch(() => {/* config optional, fail silently */})
+  }, [])
+
   // ── Settings modal ──────────────────────────────────────────────
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [llmConfig, setLlmConfig] = React.useState({
@@ -256,16 +273,29 @@ export default function WorkspacePage() {
     model: 'gpt-4o',
   })
 
-  // ── Input change handlers ─────────────────────────────────────
+  // ── Toast notifications ─────────────────────────────────────────
+  type Toast = { id: string; message: string; type: 'error' | 'success' | 'info' }
+  const [toasts, setToasts] = React.useState<Toast[]>([])
+  const addToast = (message: string, type: Toast['type'] = 'info') => {
+    const id = `toast-${Date.now()}`
+    setToasts((prev) => [...prev, { id, message, type }])
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500)
+  }
+  const removeToast = (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id))
   const handleInputsChange = (field: keyof DiscoveryInputs, value: string | string[]) => {
     setInputs((prev) => ({ ...prev, [field]: value }))
   }
 
   // ── SSE streaming handler ──────────────────────────────────────
   const handleGenerate = React.useCallback(async () => {
-    if (!inputs.feature_title.trim() || !inputs.business_objective.trim()) return
+    if (!inputs.feature_title.trim() || !inputs.business_objective.trim()) {
+      addToast('Please fill in Feature Title and Business Objective before generating.', 'error')
+      return
+    }
 
     setIsGenerating(true)
+    setGeneratingModule(null)
+    setActiveTab('epic')
 
     // Clear previous outputs (will be replaced progressively)
     setEpicMap([])
@@ -295,13 +325,20 @@ export default function WorkspacePage() {
       })
 
       if (!response.ok) {
-        console.error('Generation failed:', response.status)
+        const errText = await response.text().catch(() => response.statusText)
+        addToast(`Generation failed (${response.status}): ${errText}`, 'error')
         setIsGenerating(false)
+        setGeneratingModule(null)
         return
       }
 
       const reader = response.body?.getReader()
-      if (!reader) { setIsGenerating(false); return }
+      if (!reader) {
+        addToast('No response stream from server.', 'error')
+        setIsGenerating(false)
+        setGeneratingModule(null)
+        return
+      }
 
       const decoder = new TextDecoder()
 
@@ -328,19 +365,15 @@ export default function WorkspacePage() {
               }
               if (payload.user_stories) {
                 setUserStories(payload.user_stories)
-                setActiveTab('stories')
               }
               if (payload.qa_scenarios) {
                 setQaScenarios(payload.qa_scenarios)
-                setActiveTab('qa')
               }
               if (payload.analytics_events) {
                 setAnalyticsEvents(payload.analytics_events)
-                setActiveTab('analytics')
               }
               if (payload.risks) {
                 setRisks(payload.risks)
-                setActiveTab('risks')
               }
               if (payload.reviewer_items) {
                 setReviewItems(payload.reviewer_items)
@@ -349,12 +382,15 @@ export default function WorkspacePage() {
               // ignore malformed JSON in event
             }
           } else if (ev.event === 'error') {
-            console.error('Generation error:', ev.data)
+            addToast(`Generation error: ${ev.data}`, 'error')
+          } else if (ev.event === 'complete') {
+            addToast('✅ All artifacts generated successfully!', 'success')
           }
         }
       }
     } catch (err) {
       console.error('Stream error:', err)
+      addToast('Could not connect to backend. Make sure the server is running.', 'error')
     } finally {
       setIsGenerating(false)
       setGeneratingModule(null)
@@ -471,17 +507,27 @@ export default function WorkspacePage() {
 
   // ── Settings handlers ───────────────────────────────────────────
   const handleSaveSettings = async () => {
-    // Persist to backend via PATCH /api/config
     try {
-      await fetch('/api/config', {
+      const res = await fetch('/api/config', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(llmConfig),
+        body: JSON.stringify({
+          provider: llmConfig.provider,
+          api_key: llmConfig.apiKey,
+          base_url: llmConfig.baseUrl,
+          model: llmConfig.model,
+        }),
       })
+      if (res.ok) {
+        addToast(`${llmConfig.provider === 'minimax' ? 'MiniMax' : 'OpenAI'} settings saved successfully`, 'success')
+        setSettingsOpen(false)
+      } else {
+        const err = await res.json().catch(() => ({}))
+        addToast(`Failed to save settings: ${err.detail || res.statusText}`, 'error')
+      }
     } catch (e) {
-      // settings saved locally for now
+      addToast('Could not reach the backend. Is it running?', 'error')
     }
-    setSettingsOpen(false)
   }
 
   return (
@@ -540,6 +586,27 @@ export default function WorkspacePage() {
         onChange={setLlmConfig}
         onSave={handleSaveSettings}
       />
+
+      {/* Toast notifications */}
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 items-center pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium max-w-sm ${
+              t.type === 'error'
+                ? 'bg-red-500/90 text-white'
+                : t.type === 'success'
+                ? 'bg-green-500/90 text-white'
+                : 'bg-surface text-text-primary border border-border shadow-xl'
+            }`}
+          >
+            {t.type === 'error' && <span className="text-red-200">⚠️</span>}
+            {t.type === 'success' && <span>✅</span>}
+            <span className="flex-1">{t.message}</span>
+            <button onClick={() => removeToast(t.id)} className="opacity-60 hover:opacity-100 ml-1">✕</button>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

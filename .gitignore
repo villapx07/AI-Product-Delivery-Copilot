@@ -49,3 +49,10 @@ ENV/
 *.tgz
 *.tar.gz
 *.zip
+
+# Local databases
+backend/sessions.db
+
+# Next.js generated
+frontend/next-env.d.ts
+frontend/package-lock.json
