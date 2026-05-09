@@ -10,7 +10,7 @@ interface AcceptanceCriterion {
   type: 'happy' | 'negative' | 'edge'
 }
 
-interface UserStory {
+export interface UserStory {
   id: string
   epicId: string
   user: string

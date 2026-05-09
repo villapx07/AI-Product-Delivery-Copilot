@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { RefreshCw, Copy, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-interface QAScenario {
+export interface QAScenario {
   id: string
   title: string
   type: 'positive' | 'negative' | 'edge' | 'validation'

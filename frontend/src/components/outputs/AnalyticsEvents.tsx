@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { RefreshCw, Copy, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-interface AnalyticsEvent {
+export interface AnalyticsEvent {
   id: string
   eventName: string
   trigger: string

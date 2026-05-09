@@ -26,18 +26,17 @@ export function FileUpload({ files, onFilesChange, maxFiles = 5, maxSizeMB = 10 
     const remaining = maxFiles - files.length
     const toProcess = Array.from(fileList).slice(0, remaining)
 
-    const newFiles: UploadedFile[] = toProcess.map((file) => ({
-      id: Math.random().toString(36).slice(2),
-      name: file.name,
-      size: file.size,
-      data: '',
-      preview: undefined,
-    }))
-
     // Read files as base64
-    const readers = newFiles.map((nf) => {
+    const readers = toProcess.map((file) => {
       return new Promise<UploadedFile>((resolve) => {
         const reader = new FileReader()
+        const nf: UploadedFile = {
+          id: Math.random().toString(36).slice(2),
+          name: file.name,
+          size: file.size,
+          data: '',
+          preview: undefined,
+        }
         reader.onload = (e) => {
           const result = e.target?.result as string
           nf.data = result

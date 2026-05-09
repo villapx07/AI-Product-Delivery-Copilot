@@ -69,7 +69,7 @@ const DEMO_STORIES: UserStory[] = [
     benefit: 'I can complete KYC verification quickly and securely',
     criteria: [
       { id: 'c5', text: 'User can upload JPG/PNG/PDF up to 10MB', type: 'happy' },
-      { id: 'c6', text: 'System validates document format before upload', type: 'validation' },
+      { id: 'c6', text: 'System validates document format before upload', type: 'edge' },
       { id: 'c7', text: 'Rejected format shows clear error with supported formats', type: 'negative' },
     ],
   },
@@ -270,6 +270,19 @@ export default function WorkspacePage() {
       .catch(() => {/* config optional, fail silently */})
   }, [])
 
+  // ── Toast notifications ─────────────────────────────────────────
+  type Toast = { id: string; message: string; type: 'error' | 'success' | 'info' }
+  const [toasts, setToasts] = React.useState<Toast[]>([])
+  const addToast = (message: string, type: Toast['type'] = 'info') => {
+    const id = `toast-${Date.now()}`
+    setToasts((prev) => [...prev, { id, message, type }])
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500)
+  }
+  const removeToast = (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id))
+  const handleInputsChange = (field: keyof DiscoveryInputs, value: string | string[]) => {
+    setInputs((prev) => ({ ...prev, [field]: value }))
+  }
+
   // ── Settings modal ──────────────────────────────────────────────
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [llmConfig, setLlmConfig] = React.useState({
@@ -279,20 +292,20 @@ export default function WorkspacePage() {
     model: 'gpt-4o',
   })
 
-const DEBUG = true
+  const DEBUG = true
 
-function parseSSE(chunk: string): SSEEvent | null {
-  const eventMatch = chunk.match(/^event: (.+)/)
-  const dataMatch = chunk.match(/^data: (.+)/)
-  if (!dataMatch) return null
-  if (DEBUG) console.log('[SSE]', eventMatch ? eventMatch[1] : 'message', '→', dataMatch[1].slice(0, 80))
-  return {
-    event: eventMatch ? eventMatch[1] : 'message',
-    data: dataMatch[1],
+  function parseSSE(chunk: string): SSEEvent | null {
+    const eventMatch = chunk.match(/^event: (.+)/)
+    const dataMatch = chunk.match(/^data: (.+)/)
+    if (!dataMatch) return null
+    if (DEBUG) console.log('[SSE]', eventMatch ? eventMatch[1] : 'message', '→', dataMatch[1].slice(0, 80))
+    return {
+      event: eventMatch ? eventMatch[1] : 'message',
+      data: dataMatch[1],
+    }
   }
-}
 
-// ── SSE streaming handler ──────────────────────────────────────
+  // ── SSE streaming handler ──────────────────────────────────────
   const handleGenerate = React.useCallback(async () => {
     if (!inputs.feature_title.trim() || !inputs.business_objective.trim()) {
       addToast('Please fill in Feature Title and Business Objective before generating.', 'error')

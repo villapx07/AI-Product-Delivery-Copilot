@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { RefreshCw, Copy, Plus, Trash2, CheckSquare, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-interface RiskItem {
+export interface RiskItem {
   id: string
   text: string
   type: 'technical' | 'compliance' | 'operational' | 'stakeholder' | 'assumption'

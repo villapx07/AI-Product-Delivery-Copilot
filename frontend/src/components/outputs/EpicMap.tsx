@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { RefreshCw, Copy, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-interface Epic {
+export interface Epic {
   id: string
   title: string
   description: string
