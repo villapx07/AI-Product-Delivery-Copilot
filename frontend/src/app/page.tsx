@@ -216,6 +216,9 @@ function parseSSE(chunk: string): SSEEvent | null {
   }
 }
 
+// ── Demo seed (remove or set to false to start with blank form) ──
+const DEMO_MODE = false
+
 // ── Main page component ─────────────────────────────────────────
 export default function WorkspacePage() {
   const [activeTab, setActiveTab] = React.useState('epic')
@@ -235,13 +238,13 @@ export default function WorkspacePage() {
     { id: '1', title: 'Instant Loan Approval', date: 'May 9, 2026' },
   ])
 
-  // Output state — starts with demo data
-  const [epicMap, setEpicMap] = React.useState<Epic[]>(DEMO_EPICS)
-  const [userStories, setUserStories] = React.useState<UserStory[]>(DEMO_STORIES)
-  const [qaScenarios, setQaScenarios] = React.useState<QAScenario[]>(DEMO_QA)
-  const [analyticsEvents, setAnalyticsEvents] = React.useState<AnalyticsEvent[]>(DEMO_ANALYTICS)
-  const [risks, setRisks] = React.useState<RiskItem[]>(DEMO_RISKS)
-  const [reviewItems, setReviewItems] = React.useState<ReviewItem[]>(DEMO_REVIEWS)
+  // Output state — blank unless demo mode
+  const [epicMap, setEpicMap] = React.useState<Epic[]>(DEMO_MODE ? DEMO_EPICS : [])
+  const [userStories, setUserStories] = React.useState<UserStory[]>(DEMO_MODE ? DEMO_STORIES : [])
+  const [qaScenarios, setQaScenarios] = React.useState<QAScenario[]>(DEMO_MODE ? DEMO_QA : [])
+  const [analyticsEvents, setAnalyticsEvents] = React.useState<AnalyticsEvent[]>(DEMO_MODE ? DEMO_ANALYTICS : [])
+  const [risks, setRisks] = React.useState<RiskItem[]>(DEMO_MODE ? DEMO_RISKS : [])
+  const [reviewItems, setReviewItems] = React.useState<ReviewItem[]>(DEMO_MODE ? DEMO_REVIEWS : [])
 
   const [isGenerating, setIsGenerating] = React.useState(false)
   const [generatingModule, setGeneratingModule] = React.useState<GenerationModule | null>(null)

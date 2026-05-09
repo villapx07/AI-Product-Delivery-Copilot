@@ -3,45 +3,57 @@ import json
 from typing import AsyncGenerator, Optional
 from openai import AsyncOpenAI
 
-# ── Provider options ──────────────────────────────────────────────
-# Switch between 'openai', 'minimax' by setting LLM_PROVIDER env var.
-# Or set individual vars directly and leave PROVIDER blank.
-
-PROVIDER = os.getenv("LLM_PROVIDER", "openai")           # 'openai' | 'minimax'
-API_KEY  = os.getenv("OPENAI_API_KEY", os.getenv("MINIMAX_API_KEY", ""))
-MODEL    = os.getenv("LLM_MODEL", "gpt-4o")
-BASE_URL = os.getenv("OPENAI_BASE_URL", "")
-
 # ── MiniMax endpoint defaults ──────────────────────────────────────
-_MINIMAX_BASE = "https://api.minimax.chat/v1"
+_MINIMAX_BASE = "https://api.minimax.io/v1"
 
-def _resolve_base_url() -> str:
-    if BASE_URL:
-        return BASE_URL.rstrip("/")
-    if PROVIDER == "minimax":
+
+def _get_provider() -> str:
+    return os.getenv("LLM_PROVIDER", "openai")
+
+
+def _get_api_key() -> str:
+    """Read API key lazily from env, supporting both OpenAI and MiniMax env var names."""
+    return os.getenv("OPENAI_API_KEY") or os.getenv("MINIMAX_API_KEY") or ""
+
+
+def _get_base_url() -> str:
+    base = os.getenv("OPENAI_BASE_URL", "")
+    if base:
+        return base.rstrip("/")
+    if _get_provider() == "minimax":
         return _MINIMAX_BASE
     return "https://api.openai.com/v1"
 
 
-def _resolve_model() -> str:
-    if PROVIDER == "minimax":
-        # MiniMax uses a specific model name — allow override but default
-        return MODEL or "MiniMax-Text-01"   # text model; use "MiniMax-Image-01" for vision
-    return MODEL or "gpt-4o"
+def _get_model() -> str:
+    provider = _get_provider()
+    model = os.getenv("LLM_MODEL", "")
+    if model:
+        return model
+    if provider == "minimax":
+        return "MiniMax-Text-01"
+    return "gpt-4o"
 
 
-client: Optional[AsyncOpenAI] = None
+# ── Lazy client singleton ────────────────────────────────────────────
+_client: Optional[AsyncOpenAI] = None
 
 
 def _get_client() -> AsyncOpenAI:
-    global client
-    if client is None:
-        client = AsyncOpenAI(api_key=API_KEY, base_url=_resolve_base_url())
-    return client
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI(api_key=_get_api_key(), base_url=_get_base_url())
+    return _client
+
+
+def _reset_client() -> None:
+    """Force recreate the client on next call. Call after config changes."""
+    global _client
+    _client = None
 
 
 def get_model_name() -> str:
-    return _resolve_model()
+    return _get_model()
 
 
 async def stream_generate(
@@ -85,15 +97,34 @@ async def generate_json(
         temperature=temperature,
     )
 
-    # MiniMax supports JSON mode on compatible models
-    if PROVIDER in ("openai", "minimax"):
+    # JSON mode: OpenAI supports json_object; MiniMax's Claude-compatible endpoint
+    # accepts it but for array outputs we rely on system-prompt instruction instead
+    provider = _get_provider()
+    if provider == "openai":
         kwargs["response_format"] = {"type": "json_object"}
 
     response = await _get_client().chat.completions.create(**kwargs)
 
     raw = response.choices[0].message.content
     if raw:
-        return json.loads(raw)
+        # Strip Claude-style <thinking> blocks
+        import re
+        cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+        # Strip markdown code fences (```json ... ```)
+        fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned, flags=re.DOTALL)
+        if fence_match:
+            cleaned = fence_match.group(1).strip()
+
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Try extracting the first JSON array or object
+            for match in re.finditer(r"(\[[^\[\]]*\]|\{[^{}]*\})", cleaned, re.DOTALL):
+                try:
+                    return json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    continue
     return None
 
 

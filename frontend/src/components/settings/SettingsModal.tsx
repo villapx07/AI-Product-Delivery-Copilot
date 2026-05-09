@@ -30,7 +30,7 @@ const MODELS: Record<Provider, { label: string; value: string; note?: string }[]
     { label: 'Custom model...', value: '__custom__' },
   ],
   minimax: [
-    { label: 'Minimax2.7', value: 'Minimax2.7', note: 'Recommended' },
+    { label: 'MiniMax-M2.7', value: 'MiniMax-M2.7', note: 'Recommended · Claude-compatible' },
     { label: 'MiniMax-Text-01', value: 'MiniMax-Text-01' },
     { label: 'MiniMax-Image-01', value: 'MiniMax-Image-01', note: 'Vision' },
     { label: 'Custom model...', value: '__custom__' },

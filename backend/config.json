@@ -1,6 +1,6 @@
 {
   "provider": "minimax",
-  "api_key": "test-key",
-  "base_url": "https://api.minimax.chat/v1",
-  "model": "MiniMax-Text-01"
+  "api_key": "sk-cp-y_KKLDk9mdzx0tN0TY7PCel86t3OcdZBL5jYfvRCjmDYHeR2BVWp4sPonYCNmLeXkmN7A4su7EgPbs6xeLF1hmQpWSeFrIYy2uO8u5bO3cgBzhlZITWlalQ",
+  "base_url": "https://api.minimax.io/v1",
+  "model": "MiniMax-M2.7"
 }
