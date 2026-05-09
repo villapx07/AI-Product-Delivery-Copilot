@@ -2,7 +2,8 @@
 
 import * as React from 'react'
 import { Button } from '@/components/ui/Button'
-import { Download, Settings, Zap } from 'lucide-react'
+import { Download, Settings, Zap, HelpCircle } from 'lucide-react'
+import Link from 'next/link'
 
 interface HeaderProps {
   projectTitle?: string
@@ -23,6 +24,13 @@ export function Header({ projectTitle = 'AI Product Delivery Copilot', onExportA
         </div>
       </div>
       <div className="flex items-center gap-2">
+        <Link
+          href="/how-to-use"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary border border-border hover:border-border rounded-lg transition-all bg-background hover:bg-background/80"
+        >
+          <HelpCircle className="w-3.5 h-3.5" />
+          How to Use
+        </Link>
         <Button variant="secondary" size="sm" onClick={onExportAll}>
           <Download className="w-3.5 h-3.5" />
           Export All
