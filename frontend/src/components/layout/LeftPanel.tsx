@@ -21,6 +21,7 @@ interface LeftPanelProps {
   onFilesChange: (files: UploadedFile[]) => void
   onGenerate: () => void
   isGenerating: boolean
+  generatingModule?: string | null
   sessions: { id: string; title: string; date: string }[]
   onLoadSession: (id: string) => void
   onClearSessions: () => void
@@ -33,6 +34,7 @@ export function LeftPanel({
   onFilesChange,
   onGenerate,
   isGenerating,
+  generatingModule,
   sessions,
   onLoadSession,
   onClearSessions,
@@ -55,6 +57,7 @@ export function LeftPanel({
           onChange={onInputsChange}
           onGenerate={onGenerate}
           isGenerating={isGenerating}
+          generatingModule={generatingModule}
           canGenerate={canGenerate}
         />
 

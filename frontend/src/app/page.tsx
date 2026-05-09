@@ -5,7 +5,13 @@ import { Header } from '@/components/layout/Header'
 import { LeftPanel } from '@/components/layout/LeftPanel'
 import { CenterPanel } from '@/components/layout/CenterPanel'
 import { AIReviewer } from '@/components/reviewer/AIReviewer'
+import { SettingsModal } from '@/components/settings/SettingsModal'
 import type { DiscoveryInputs } from '@/components/inputs/DiscoveryForm'
+import type { Epic } from '@/components/outputs/EpicMap'
+import type { UserStory } from '@/components/outputs/UserStories'
+import type { QAScenario } from '@/components/outputs/QAScenarios'
+import type { AnalyticsEvent } from '@/components/outputs/AnalyticsEvents'
+import type { RiskItem } from '@/components/outputs/Risks'
 
 interface UploadedFile {
   id: string
@@ -21,8 +27,8 @@ interface Session {
   date: string
 }
 
-// Placeholder demo data
-const DEMO_EPICS: any[] = [
+// ── Demo / initial state data ───────────────────────────────────
+const DEMO_EPICS: Epic[] = [
   {
     id: '1',
     title: 'Instant Loan Approval',
@@ -41,7 +47,7 @@ const DEMO_EPICS: any[] = [
   },
 ]
 
-const DEMO_STORIES: any[] = [
+const DEMO_STORIES: UserStory[] = [
   {
     id: '1',
     epicId: 'Instant Loan Approval',
@@ -55,37 +61,164 @@ const DEMO_STORIES: any[] = [
       { id: 'c4', text: 'Rejected application shows reason code, not raw score', type: 'negative' },
     ],
   },
+  {
+    id: '2',
+    epicId: 'Instant Loan Approval',
+    user: 'borrower',
+    goal: 'upload valid identity documents',
+    benefit: 'I can complete KYC verification quickly and securely',
+    criteria: [
+      { id: 'c5', text: 'User can upload JPG/PNG/PDF up to 10MB', type: 'happy' },
+      { id: 'c6', text: 'System validates document format before upload', type: 'validation' },
+      { id: 'c7', text: 'Rejected format shows clear error with supported formats', type: 'negative' },
+    ],
+  },
 ]
 
-const DEMO_QA: any[] = [
-  { id: 'q1', title: 'Submit application with valid inputs', type: 'positive', preconditions: 'User is authenticated and has no existing loan', steps: '1. Fill all required fields\n2. Accept T&C\n3. Click Submit', expectedResult: 'Decision returned within 60s with approval or rejection reason' },
-  { id: 'q2', title: 'Submit with missing required field', type: 'negative', preconditions: 'User has opened the form', steps: '1. Leave "annual income" empty\n2. Click Submit', expectedResult: 'Inline validation error shown, form not submitted' },
+const DEMO_QA: QAScenario[] = [
+  {
+    id: 'q1',
+    title: 'Submit application with all valid inputs',
+    type: 'positive',
+    preconditions: 'User is authenticated and has no existing loan',
+    steps: '1. Navigate to loan application form\n2. Fill all required fields (name, income, loan amount, term)\n3. Accept Terms & Conditions\n4. Click Submit',
+    expectedResult: 'Decision returned within 60 seconds with approval or rejection reason displayed',
+  },
+  {
+    id: 'q2',
+    title: 'Submit with a missing required field',
+    type: 'negative',
+    preconditions: 'User has opened the application form',
+    steps: '1. Leave "Annual Income" field empty\n2. Fill all other required fields\n3. Click Submit',
+    expectedResult: 'Inline validation error shown on the empty field; form not submitted',
+  },
+  {
+    id: 'q3',
+    title: 'Upload document in unsupported format',
+    type: 'validation',
+    preconditions: 'User is on the KYC document upload screen',
+    steps: '1. Select a .exe file instead of JPG/PNG/PDF\n2. Click Upload',
+    expectedResult: 'Error message: "Unsupported file type. Please upload JPG, PNG or PDF."',
+  },
+  {
+    id: 'q4',
+    title: 'Session timeout during application',
+    type: 'edge',
+    preconditions: 'User has partially filled the application form',
+    steps: '1. Fill some fields\n2. Leave browser idle for 30 minutes\n3. Attempt to submit',
+    expectedResult: 'Session expired message shown; user redirected to re-login; draft auto-saved for 24h',
+  },
 ]
 
-const DEMO_ANALYTICS: any[] = [
-  { id: 'a1', eventName: 'loan_application_started', trigger: 'User opens application form', purpose: 'Track funnel drop-off at entry', funnelStage: 'awareness' },
-  { id: 'a2', eventName: 'loan_application_submitted', trigger: 'User clicks Submit with valid data', purpose: 'Measure submission rate', funnelStage: 'consideration' },
-  { id: 'a3', eventName: 'loan_approval_issued', trigger: 'Backend returns APPROVED', purpose: 'Track conversion to approved loans', funnelStage: 'conversion' },
+const DEMO_ANALYTICS: AnalyticsEvent[] = [
+  {
+    id: 'a1',
+    eventName: 'loan_application_started',
+    trigger: 'User opens the application form',
+    purpose: 'Track how many users begin the application funnel',
+    funnelStage: 'awareness',
+  },
+  {
+    id: 'a2',
+    eventName: 'loan_application_page_viewed',
+    trigger: 'Application form fully loaded in browser',
+    purpose: 'Measure drop-off between open and start',
+    funnelStage: 'awareness',
+  },
+  {
+    id: 'a3',
+    eventName: 'loan_application_submitted',
+    trigger: 'User clicks Submit with all valid fields',
+    purpose: 'Measure submission rate and identify abandonment',
+    funnelStage: 'consideration',
+  },
+  {
+    id: 'a4',
+    eventName: 'loan_approval_issued',
+    trigger: 'Backend returns APPROVED status',
+    purpose: 'Track conversion from submitted to approved',
+    funnelStage: 'conversion',
+  },
+  {
+    id: 'a5',
+    eventName: 'loan_disbursement_completed',
+    trigger: 'Funds transferred to borrower account',
+    purpose: 'Confirm actual conversion; measure time to disbursement',
+    funnelStage: 'conversion',
+  },
 ]
 
-const DEMO_RISKS: any[] = [
-  { id: 'r1', text: 'Credit scoring service SLA not guaranteed at 99.9%', type: 'technical', severity: 'high', checked: false, suggestedAction: 'Add circuit breaker + fallback to manual review' },
-  { id: 'r2', text: 'Regulatory review may require 48h cooling period for first-time borrowers', type: 'compliance', severity: 'medium', checked: false, suggestedAction: 'Validate with Legal before launch date' },
-  { id: 'r3', text: 'KYC provider rate limits may cause timeout during peak hours', type: 'operational', severity: 'high', checked: false, suggestedAction: 'Implement async queue with SMS notification' },
-  { id: 'r4', text: 'Disbursement to unverified bank accounts may trigger fraud', type: 'stakeholder', severity: 'high', checked: false, suggestedAction: 'Require bank account verification before disbursement' },
+const DEMO_RISKS: RiskItem[] = [
+  {
+    id: 'r1',
+    text: 'Credit scoring service SLA not guaranteed at 99.9% uptime — may cause timeout during peak hours',
+    type: 'technical',
+    severity: 'high',
+    checked: false,
+    suggestedAction: 'Add circuit breaker with fallback to manual review queue + SMS notification to applicant',
+  },
+  {
+    id: 'r2',
+    text: 'Regulatory review may require 48h cooling period for first-time borrowers before disbursement',
+    type: 'compliance',
+    severity: 'medium',
+    checked: false,
+    suggestedAction: 'Validate with Legal team before launch; add countdown timer in UI during cooling period',
+  },
+  {
+    id: 'r3',
+    text: 'KYC provider has rate limits (100 req/min) — peak traffic could trigger 429 errors',
+    type: 'operational',
+    severity: 'high',
+    checked: false,
+    suggestedAction: 'Implement async queue with retry; notify user via SMS when KYC completes',
+  },
+  {
+    id: 'r4',
+    text: 'Disbursement to unverified bank accounts may trigger fraud / AML alerts',
+    type: 'stakeholder',
+    severity: 'high',
+    checked: false,
+    suggestedAction: 'Require bank account verification (name + account match) before any disbursement initiation',
+  },
 ]
 
 const DEMO_REVIEWS = [
-  { id: 'rv1', category: 'risk', message: 'Disbursement to unverified accounts — fraud risk flagged. Address before sprint planning.', dismissed: false },
-  { id: 'rv2', category: 'compliance', message: 'Regulatory cooling period assumption not validated with Legal.', dismissed: false },
-  { id: 'rv3', category: 'stakeholder', message: 'Accounting team not in impacted teams list — revenue recognition approach unclear.', dismissed: false },
-  { id: 'rv4', category: 'missing', message: 'Retry logic not defined for failed disbursement. What happens if payout fails after approval?', dismissed: false },
-  { id: 'rv5', category: 'completeness', message: 'Epic Map covers E2E flow well. Analytics instrumentation is solid.', dismissed: true },
+  { id: 'rv1', category: 'risk' as const, message: 'Disbursement to unverified accounts — fraud/AML risk flagged. Address before sprint planning.', dismissed: false },
+  { id: 'rv2', category: 'stakeholder' as const, message: 'Accounting team not listed in impacted teams — revenue recognition approach needs validation.', dismissed: false },
+  { id: 'rv3', category: 'missing' as const, message: 'Retry logic not defined for failed disbursement after approval. What happens to the customer if payout fails?', dismissed: false },
+  { id: 'rv4', category: 'assumption' as const, message: '48h regulatory cooling period assumption not yet validated with Legal.', dismissed: false },
+  { id: 'rv5', category: 'completeness' as const, message: 'Epic Map covers E2E flow well. Analytics funnel instrumentation is solid.', dismissed: true },
 ]
 
+type GenerationModule = 'epic_map' | 'user_stories' | 'qa_scenarios' | 'analytics_events' | 'risks' | 'reviewer'
+
+interface ReviewItem {
+  id: string
+  category: 'missing' | 'assumption' | 'risk' | 'stakeholder' | 'completeness'
+  message: string
+  dismissed: boolean
+}
+
+// ── SSE parsing ────────────────────────────────────────────────
+interface SSEEvent {
+  event: string
+  data: string
+}
+
+function parseSSE(chunk: string): SSEEvent | null {
+  const eventMatch = chunk.match(/^event: (.+)/)
+  const dataMatch = chunk.match(/^data: (.+)/)
+  if (!dataMatch) return null
+  return {
+    event: eventMatch ? eventMatch[1] : 'message',
+    data: dataMatch[1],
+  }
+}
+
+// ── Main page component ─────────────────────────────────────────
 export default function WorkspacePage() {
   const [activeTab, setActiveTab] = React.useState('epic')
-  const [isGenerating, setIsGenerating] = React.useState(false)
 
   const [inputs, setInputs] = React.useState<DiscoveryInputs>({
     feature_title: '',
@@ -102,39 +235,156 @@ export default function WorkspacePage() {
     { id: '1', title: 'Instant Loan Approval', date: 'May 9, 2026' },
   ])
 
-  const [epicMap, setEpicMap] = React.useState(DEMO_EPICS)
-  const [userStories, setUserStories] = React.useState(DEMO_STORIES)
-  const [qaScenarios, setQaScenarios] = React.useState(DEMO_QA)
-  const [analyticsEvents, setAnalyticsEvents] = React.useState(DEMO_ANALYTICS)
-  const [risks, setRisks] = React.useState(DEMO_RISKS)
-  const [reviewItems, setReviewItems] = React.useState(DEMO_REVIEWS)
+  // Output state — starts with demo data
+  const [epicMap, setEpicMap] = React.useState<Epic[]>(DEMO_EPICS)
+  const [userStories, setUserStories] = React.useState<UserStory[]>(DEMO_STORIES)
+  const [qaScenarios, setQaScenarios] = React.useState<QAScenario[]>(DEMO_QA)
+  const [analyticsEvents, setAnalyticsEvents] = React.useState<AnalyticsEvent[]>(DEMO_ANALYTICS)
+  const [risks, setRisks] = React.useState<RiskItem[]>(DEMO_RISKS)
+  const [reviewItems, setReviewItems] = React.useState<ReviewItem[]>(DEMO_REVIEWS)
+
+  const [isGenerating, setIsGenerating] = React.useState(false)
+  const [generatingModule, setGeneratingModule] = React.useState<GenerationModule | null>(null)
   const [isRegenerating, setIsRegenerating] = React.useState<Record<string, boolean>>({})
 
+  // ── Settings modal ──────────────────────────────────────────────
+  const [settingsOpen, setSettingsOpen] = React.useState(false)
+  const [llmConfig, setLlmConfig] = React.useState({
+    provider: 'openai' as 'openai' | 'minimax',
+    apiKey: '',
+    baseUrl: '',
+    model: 'gpt-4o',
+  })
+
+  // ── Input change handlers ─────────────────────────────────────
   const handleInputsChange = (field: keyof DiscoveryInputs, value: string | string[]) => {
     setInputs((prev) => ({ ...prev, [field]: value }))
   }
 
-  const handleGenerate = () => {
+  // ── SSE streaming handler ──────────────────────────────────────
+  const handleGenerate = React.useCallback(async () => {
+    if (!inputs.feature_title.trim() || !inputs.business_objective.trim()) return
+
     setIsGenerating(true)
-    // Simulate generation delay
-    setTimeout(() => {
+
+    // Clear previous outputs (will be replaced progressively)
+    setEpicMap([])
+    setUserStories([])
+    setQaScenarios([])
+    setAnalyticsEvents([])
+    setRisks([])
+    setReviewItems([])
+
+    let buffer = ''
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feature_title: inputs.feature_title,
+          business_objective: inputs.business_objective,
+          problem_statement: inputs.problem_statement,
+          success_metrics: inputs.success_metrics,
+          constraints: inputs.constraints,
+          assumptions: inputs.assumptions,
+          impacted_teams: inputs.impacted_teams,
+          uploaded_files: files.map((f) => f.data),
+          file_names: files.map((f) => f.name),
+        }),
+      })
+
+      if (!response.ok) {
+        console.error('Generation failed:', response.status)
+        setIsGenerating(false)
+        return
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) { setIsGenerating(false); return }
+
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const rawLine of lines) {
+          const ev = parseSSE(rawLine.trim())
+          if (!ev || !ev.data) continue
+
+          if (ev.event === 'module_start') {
+            setGeneratingModule(ev.data as GenerationModule)
+          } else if (ev.event === 'module_complete') {
+            try {
+              const payload = JSON.parse(ev.data)
+              if (payload.epic_map) {
+                setEpicMap(payload.epic_map)
+                setActiveTab('epic')
+              }
+              if (payload.user_stories) {
+                setUserStories(payload.user_stories)
+                setActiveTab('stories')
+              }
+              if (payload.qa_scenarios) {
+                setQaScenarios(payload.qa_scenarios)
+                setActiveTab('qa')
+              }
+              if (payload.analytics_events) {
+                setAnalyticsEvents(payload.analytics_events)
+                setActiveTab('analytics')
+              }
+              if (payload.risks) {
+                setRisks(payload.risks)
+                setActiveTab('risks')
+              }
+              if (payload.reviewer_items) {
+                setReviewItems(payload.reviewer_items)
+              }
+            } catch (e) {
+              // ignore malformed JSON in event
+            }
+          } else if (ev.event === 'error') {
+            console.error('Generation error:', ev.data)
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Stream error:', err)
+    } finally {
       setIsGenerating(false)
-    }, 2000)
-  }
+      setGeneratingModule(null)
+    }
+  }, [inputs, files])
+
+  // ── Per-section regenerate ─────────────────────────────────────
+  const handleRegenerate = React.useCallback((module: string) => {
+    // For MVP, just re-run full generation (backend handles per-module)
+    setIsRegenerating((prev) => ({ ...prev, [module]: true }))
+    setTimeout(() => {
+      handleGenerate().finally(() => {
+        setIsRegenerating((prev) => ({ ...prev, [module]: false }))
+      })
+    }, 100)
+  }, [handleGenerate])
 
   const handleLoadSession = (id: string) => {
-    // In MVP, just show existing demo data
-    console.log('Loading session', id)
+    // Future: load session from storage
+    console.log('Load session', id)
   }
 
-  const handleClearSessions = () => {
-    // In MVP, no sessions to clear
-  }
+  const handleClearSessions = () => {}
 
-  const handleEditEpic = (id: string, field: string, value: string) => {
+  // ── Epic edit ──────────────────────────────────────────────────
+  const handleEditEpic = (id: string, field: keyof Epic, value: string) => {
     setEpicMap((prev) => prev.map((e) => (e.id === id ? { ...e, [field]: value } : e)))
   }
 
+  // ── User story edit ────────────────────────────────────────────
   const handleEditStory = (storyId: string, field: string, value: string) => {
     if (field.startsWith('criterion_')) {
       const criterionId = field.replace('criterion_', '')
@@ -151,9 +401,12 @@ export default function WorkspacePage() {
   }
 
   const handleAddCriterion = (storyId: string) => {
-    const newCriterion = { id: `c${Date.now()}`, text: 'New acceptance criterion', type: 'happy' as const }
     setUserStories((prev) =>
-      prev.map((s) => (s.id === storyId ? { ...s, criteria: [...s.criteria, newCriterion] } : s))
+      prev.map((s) =>
+        s.id === storyId
+          ? { ...s, criteria: [...s.criteria, { id: `c${Date.now()}`, text: 'New acceptance criterion', type: 'happy' }] }
+          : s
+      )
     )
   }
 
@@ -163,59 +416,80 @@ export default function WorkspacePage() {
     )
   }
 
-  const handleEditQA = (id: string, field: string, value: string) => {
+  // ── QA edit ────────────────────────────────────────────────────
+  const handleEditQA = (id: string, field: keyof QAScenario, value: string) => {
     setQaScenarios((prev) => prev.map((q) => (q.id === id ? { ...q, [field]: value } : q)))
   }
 
-  const handleAddScenario = (type: any) => {
-    const newScenario = { id: `q${Date.now()}`, title: 'New scenario', type, preconditions: 'TBD', steps: 'TBD', expectedResult: 'TBD' }
-    setQaScenarios((prev) => [...prev, newScenario])
+  const handleAddScenario = (type: QAScenario['type']) => {
+    setQaScenarios((prev) => [
+      ...prev,
+      { id: `q${Date.now()}`, title: 'New scenario', type, preconditions: 'TBD', steps: 'TBD', expectedResult: 'TBD' },
+    ])
   }
 
   const handleRemoveScenario = (id: string) => {
     setQaScenarios((prev) => prev.filter((q) => q.id !== id))
   }
 
-  const handleEditAnalytics = (id: string, field: string, value: string) => {
+  // ── Analytics edit ────────────────────────────────────────────
+  const handleEditAnalytics = (id: string, field: keyof AnalyticsEvent, value: string) => {
     setAnalyticsEvents((prev) => prev.map((a) => (a.id === id ? { ...a, [field]: value } : a)))
   }
 
   const handleAddAnalytics = () => {
-    const newEvent = { id: `a${Date.now()}`, eventName: 'new_event', trigger: 'TBD', purpose: 'TBD', funnelStage: 'awareness' as const }
-    setAnalyticsEvents((prev) => [...prev, newEvent])
+    setAnalyticsEvents((prev) => [
+      ...prev,
+      { id: `a${Date.now()}`, eventName: 'new_event', trigger: 'TBD', purpose: 'TBD', funnelStage: 'awareness' },
+    ])
   }
 
   const handleRemoveAnalytics = (id: string) => {
     setAnalyticsEvents((prev) => prev.filter((a) => a.id !== id))
   }
 
-  const handleEditRisk = (id: string, field: string, value: string | boolean) => {
+  // ── Risks edit ─────────────────────────────────────────────────
+  const handleEditRisk = (id: string, field: keyof RiskItem, value: string | boolean) => {
     setRisks((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)))
   }
 
   const handleAddRisk = () => {
-    const newRisk = { id: `r${Date.now()}`, text: 'New risk item', type: 'technical' as const, severity: 'medium' as const, checked: false, suggestedAction: '' }
-    setRisks((prev) => [...prev, newRisk])
+    setRisks((prev) => [
+      ...prev,
+      { id: `r${Date.now()}`, text: 'New risk item', type: 'technical', severity: 'medium', checked: false, suggestedAction: '' },
+    ])
   }
 
   const handleRemoveRisk = (id: string) => {
     setRisks((prev) => prev.filter((r) => r.id !== id))
   }
 
-  const handleRegenerate = (module: string) => {
-    setIsRegenerating((prev) => ({ ...prev, [module]: true }))
-    setTimeout(() => {
-      setIsRegenerating((prev) => ({ ...prev, [module]: false }))
-    }, 1500)
-  }
-
+  // ── Reviewer dismiss ───────────────────────────────────────────
   const handleDismissReview = (id: string) => {
     setReviewItems((prev) => prev.map((r) => (r.id === id ? { ...r, dismissed: true } : r)))
   }
 
+  // ── Settings handlers ───────────────────────────────────────────
+  const handleSaveSettings = async () => {
+    // Persist to backend via PATCH /api/config
+    try {
+      await fetch('/api/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(llmConfig),
+      })
+    } catch (e) {
+      // settings saved locally for now
+    }
+    setSettingsOpen(false)
+  }
+
   return (
     <div className="h-screen flex flex-col bg-background">
-      <Header />
+      <Header
+        onOpenSettings={() => setSettingsOpen(true)}
+        onExportAll={() => {}}
+      />
       <div className="flex-1 flex min-h-0">
         <LeftPanel
           inputs={inputs}
@@ -224,6 +498,7 @@ export default function WorkspacePage() {
           onFilesChange={setFiles}
           onGenerate={handleGenerate}
           isGenerating={isGenerating}
+          generatingModule={generatingModule}
           sessions={sessions}
           onLoadSession={handleLoadSession}
           onClearSessions={handleClearSessions}
@@ -253,8 +528,18 @@ export default function WorkspacePage() {
           onRegenerate={handleRegenerate}
           isRegenerating={isRegenerating}
         />
-        <AIReviewer items={reviewItems} onDismiss={handleDismissReview} />
+        <AIReviewer
+          items={reviewItems}
+          onDismiss={handleDismissReview}
+        />
       </div>
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        config={llmConfig}
+        onChange={setLlmConfig}
+        onSave={handleSaveSettings}
+      />
     </div>
   )
 }

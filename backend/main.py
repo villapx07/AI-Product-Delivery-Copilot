@@ -1,14 +1,16 @@
 import os
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from sse_starlette.sse import EventSourceResponse
+from pydantic import BaseModel
 
 from models import GenerateRequest
+from config_manager import load_config, save_config, apply_config, DEFAULT_CONFIG
 from prompt_orchestrator import (
     build_epic_prompt,
     build_user_stories_prompt,
@@ -17,19 +19,32 @@ from prompt_orchestrator import (
     build_risks_prompt,
     build_reviewer_prompt,
 )
-from llm_client import generate_json, stream_generate
+from llm_client import generate_json, stream_generate, generate_with_image
+
+
+# ── Config persistence ────────────────────────────────────────────
+CONFIG_FILE = Path(__file__).parent / "config.json"
+
+
+class ConfigUpdate(BaseModel):
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup — load saved config and apply to env
     print("🚀 AI Product Delivery Copilot API starting...")
+    cfg = load_config()
+    apply_config(cfg)
+    print(f"  Provider: {cfg.get('provider', 'openai')} | Model: {cfg.get('model', 'gpt-4o')}")
     yield
-    # Shutdown
     print("👋 Shutting down...")
 
 
-app = FastAPI(title="AI Product Delivery Copilot", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="AI Product Delivery Copilot", version="1.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,8 +55,38 @@ app.add_middleware(
 )
 
 
+# ── Config endpoint ──────────────────────────────────────────────
+@app.get("/api/config")
+async def get_config():
+    """Return current LLM config (api_key masked)."""
+    cfg = load_config()
+    if cfg.get("api_key"):
+        cfg["api_key"] = cfg["api_key"][:6] + "***"   # mask for display
+    return cfg
+
+
+@app.patch("/api/config")
+async def update_config(update: ConfigUpdate):
+    """Update LLM config and persist to disk."""
+    cfg = load_config()
+    if update.provider is not None:
+        cfg["provider"] = update.provider
+    if update.api_key is not None:
+        cfg["api_key"] = update.api_key
+    if update.base_url is not None:
+        cfg["base_url"] = update.base_url
+    if update.model is not None:
+        cfg["model"] = update.model
+
+    saved = save_config(cfg)
+    apply_config(saved)
+    print(f"⚙️  Config updated — provider={saved['provider']} model={saved['model']}")
+    return {"status": "ok", "config": saved}
+
+
+# ── SSE generation pipeline ───────────────────────────────────────
 async def generate_sse(req: GenerateRequest) -> AsyncGenerator[dict, None]:
-    """Main generation pipeline with SSE streaming."""
+    """Sequential module generation with image analysis support."""
 
     all_artifacts = {}
 
@@ -121,8 +166,31 @@ async def generate_sse(req: GenerateRequest) -> AsyncGenerator[dict, None]:
     except Exception as e:
         yield {"event": "error", "data": f"Reviewer generation failed: {str(e)}"}
 
+    # Image analysis (optional step if files were uploaded)
+    if req.uploaded_files and req.file_names:
+        yield {"event": "module_start", "data": "image_analysis"}
+        try:
+            system = load_prompt("image_analysis") or (
+                "You are a senior UX/product analyst. Given a screenshot or design image, describe "
+                "the user flow, key UI elements, and potential product implications."
+            )
+            for i, (img_b64, img_name) in enumerate(zip(req.uploaded_files, req.file_names)):
+                result = await generate_with_image(system, f"Analyze this image ({img_name}):", img_b64)
+                if result:
+                    all_artifacts[f"image_analysis_{i}"] = result
+            yield {"event": "module_complete", "data": json.dumps({"image_analysis": all_artifacts.get("image_analysis_0", {})})}
+        except Exception as e:
+            yield {"event": "error", "data": f"Image analysis failed: {str(e)}"}
+
     # Complete
     yield {"event": "complete", "data": json.dumps(all_artifacts)}
+
+
+def load_prompt(name: str) -> str:
+    try:
+        return (Path(__file__).parent / "prompts" / f"{name}.txt").read_text()
+    except Exception:
+        return ""
 
 
 async def event_generator(req: GenerateRequest) -> AsyncGenerator[str, None]:
@@ -133,9 +201,7 @@ async def event_generator(req: GenerateRequest) -> AsyncGenerator[str, None]:
 
 @app.post("/api/generate")
 async def generate(request: GenerateRequest):
-    """
-    Main generation endpoint. Streams SSE events as each module completes.
-    """
+    """Main generation endpoint. Streams SSE events as each module completes."""
     return StreamingResponse(
         event_generator(request),
         media_type="text/event-stream",
@@ -149,7 +215,14 @@ async def generate(request: GenerateRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "ai-product-delivery-copilot"}
+    cfg = load_config()
+    return {
+        "status": "ok",
+        "service": "ai-product-delivery-copilot",
+        "version": "1.1.0",
+        "provider": cfg.get("provider", "openai"),
+        "model": cfg.get("model", "gpt-4o"),
+    }
 
 
 if __name__ == "__main__":

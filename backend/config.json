@@ -1,0 +1,6 @@
+{
+  "provider": "minimax",
+  "api_key": "test-key",
+  "base_url": "https://api.minimax.chat/v1",
+  "model": "MiniMax-Text-01"
+}

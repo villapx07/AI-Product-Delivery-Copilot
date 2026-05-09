@@ -37,9 +37,10 @@ interface DiscoveryFormProps {
   onGenerate: () => void
   isGenerating: boolean
   canGenerate: boolean
+  generatingModule?: string | null
 }
 
-export function DiscoveryForm({ inputs, onChange, onGenerate, isGenerating, canGenerate }: DiscoveryFormProps) {
+export function DiscoveryForm({ inputs, onChange, onGenerate, isGenerating, canGenerate, generatingModule }: DiscoveryFormProps) {
   const handleTeamToggle = (team: string) => {
     const current = inputs.impacted_teams
     const updated = current.includes(team)
@@ -126,7 +127,11 @@ export function DiscoveryForm({ inputs, onChange, onGenerate, isGenerating, canG
         size="lg"
         className="w-full mt-2"
       >
-        {isGenerating ? 'Analyzing...' : 'Generate Delivery Artifacts'}
+        {isGenerating
+          ? generatingModule
+            ? `Generating ${generatingModule.replace('_', ' ')}...`
+            : 'Analyzing...'
+          : 'Generate Delivery Artifacts'}
       </Button>
     </div>
   )

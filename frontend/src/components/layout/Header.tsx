@@ -7,9 +7,10 @@ import { Download, Settings, Zap } from 'lucide-react'
 interface HeaderProps {
   projectTitle?: string
   onExportAll?: () => void
+  onOpenSettings?: () => void
 }
 
-export function Header({ projectTitle = 'AI Product Delivery Copilot', onExportAll }: HeaderProps) {
+export function Header({ projectTitle = 'AI Product Delivery Copilot', onExportAll, onOpenSettings }: HeaderProps) {
   return (
     <header className="h-14 bg-surface border-b border-border flex items-center justify-between px-4 shrink-0">
       <div className="flex items-center gap-3">
@@ -26,7 +27,7 @@ export function Header({ projectTitle = 'AI Product Delivery Copilot', onExportA
           <Download className="w-3.5 h-3.5" />
           Export All
         </Button>
-        <Button variant="ghost" size="sm">
+        <Button variant="ghost" size="sm" onClick={onOpenSettings} title="LLM Settings">
           <Settings className="w-3.5 h-3.5" />
         </Button>
       </div>
