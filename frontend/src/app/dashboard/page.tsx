@@ -47,7 +47,7 @@ export default function DashboardPage() {
   if (!user) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg)' }}>
-        <div style={{ width: 24, height: 24, border: '2px solid var(--color-border)', borderTopColor: 'var(--color-primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <div style={{ width: 24, height: 24, border: '2px solid var(--color-border)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
       </div>
     )
   }
@@ -152,7 +152,7 @@ function WorkbenchCard({ workbench }: { workbench: Workbench }) {
       onClick={() => router.push(`/workbench/${workbench.id}`)}
       onMouseEnter={(e) => {
         const el = e.currentTarget as HTMLDivElement
-        el.style.borderColor = 'var(--color-primary)'
+        el.style.borderColor = '#3b82f6'
         el.style.boxShadow = '0 2px 12px rgba(0,0,0,0.08)'
       }}
       onMouseLeave={(e) => {
@@ -189,7 +189,7 @@ function WorkbenchCard({ workbench }: { workbench: Workbench }) {
 const btnPrimaryStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: '6px',
   padding: '9px 16px', borderRadius: '8px', border: 'none',
-  background: 'var(--color-primary)', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+  background: '#3b82f6', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
 }
 const cardStyle: React.CSSProperties = {
   background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '10px',
@@ -204,6 +204,6 @@ const errorStyle: React.CSSProperties = {
   borderRadius: '8px', padding: '14px 18px', fontSize: '14px', color: '#ef4444',
 }
 const spinnerStyle: React.CSSProperties = {
-  width: 16, height: 16, border: '2px solid var(--color-border)', borderTopColor: 'var(--color-primary)',
+  width: 16, height: 16, border: '2px solid var(--color-border)', borderTopColor: '#3b82f6',
   borderRadius: '50%', animation: 'spin 0.8s linear infinite',
 }

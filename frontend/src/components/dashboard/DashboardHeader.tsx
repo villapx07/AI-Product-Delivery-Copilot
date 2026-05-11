@@ -78,7 +78,7 @@ export function DashboardHeader({ user }: Props) {
             width: 28,
             height: 28,
             borderRadius: '50%',
-            background: 'var(--color-primary)',
+            background: '#3b82f6',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',

@@ -256,7 +256,19 @@ def _build_workbench_response(workbench: Workbench, db: Session, requesting_user
 # ── Sync helper for generation pipeline (no auth, used by main.py) ────────────
 
 def get_workbench(workbench_id: str):
-    """Return a Workbench row by id (sync, no auth — used by generation pipeline)."""
+    """Return a Workbench row by id as a detached-safe dict (no auth — used by generation pipeline)."""
     from db import session_scope
     with session_scope() as db:
-        return db.query(Workbench).filter(Workbench.id == workbench_id).first()
+        wb = db.query(Workbench).filter(Workbench.id == workbench_id).first()
+        if not wb:
+            return None
+        return {
+            "id": wb.id, "title": wb.title, "status": wb.status,
+            "business_objective": wb.business_objective,
+            "problem_statement": wb.problem_statement,
+            "success_metrics": wb.success_metrics,
+            "constraints": wb.constraints,
+            "assumptions": wb.rollout_assumptions,
+            "impacted_teams": wb.impacted_teams,
+            "owner_id": wb.owner_id,
+        }

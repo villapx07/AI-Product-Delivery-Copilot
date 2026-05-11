@@ -64,17 +64,40 @@ export default function LoginPage() {
           </div>
           <div>
             <label style={labelStyle}>Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
-              placeholder="••••••••" style={inputStyle} />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoComplete="current-password"
+              placeholder="Enter your password"
+              style={{
+                ...inputStyle,
+                background: 'var(--surface, #fff)',
+                color: 'var(--text-primary, #18181b)',
+              }}
+            />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '13px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-secondary)', cursor: 'pointer' }}>
               <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)}
-                style={{ accentColor: 'var(--color-primary)' }} />
+                style={{ accentColor: '#3b82f6' }} />
               Remember me
             </label>
           </div>
-          <button type="submit" style={{ ...buttonStyle }}>
+          <button type="submit" style={{
+            ...buttonStyle,
+            background: 'var(--color-primary, #3b82f6)',
+            color: '#fff',
+            width: '100%',
+            padding: '11px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            fontSize: '14px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            marginTop: '4px',
+          }}>
             Sign in
           </button>
         </form>
@@ -91,7 +114,7 @@ const inputStyle: React.CSSProperties = {
   background: 'var(--color-bg)', color: 'var(--color-text-primary)', fontSize: '14px', outline: 'none', boxSizing: 'border-box',
 }
 const buttonStyle: React.CSSProperties = {
-  padding: '10px 16px', borderRadius: '8px', border: 'none', background: 'var(--color-primary)',
+  padding: '10px 16px', borderRadius: '8px', border: 'none', background: '#3b82f6',
   color: '#fff', fontSize: '14px', fontWeight: 600, marginTop: '4px', cursor: 'pointer',
 }
 const errorStyle: React.CSSProperties = {

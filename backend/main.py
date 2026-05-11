@@ -183,13 +183,13 @@ async def generate_module_sse(
     workbench = get_workbench(workbench_id)
 
     discovery = {
-        "feature_title": workbench.title if workbench else "",
-        "business_objective": workbench.business_objective if workbench else "",
-        "problem_statement": workbench.problem_statement if workbench else "",
-        "success_metrics": workbench.success_metrics if workbench else "",
-        "constraints": workbench.constraints if workbench else "",
-        "assumptions": workbench.assumptions if workbench else "",
-        "impacted_teams": workbench.impacted_teams if workbench else [],
+        "feature_title": workbench["title"] if workbench else "",
+        "business_objective": workbench["business_objective"] if workbench else "",
+        "problem_statement": workbench["problem_statement"] if workbench else "",
+        "success_metrics": workbench["success_metrics"] if workbench else "",
+        "constraints": workbench["constraints"] if workbench else "",
+        "assumptions": workbench["assumptions"] if workbench else "",
+        "impacted_teams": workbench["impacted_teams"] if workbench else [],
     }
 
     yield {"event": "module_start", "data": module}

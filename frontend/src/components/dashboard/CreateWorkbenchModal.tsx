@@ -92,7 +92,7 @@ const inputStyle: React.CSSProperties = {
   background: 'var(--color-bg)', color: 'var(--color-text-primary)', fontSize: '14px', outline: 'none', boxSizing: 'border-box',
 }
 const btnPrimaryStyle: React.CSSProperties = {
-  padding: '9px 18px', borderRadius: '8px', border: 'none', background: 'var(--color-primary)', color: '#fff',
+  padding: '9px 18px', borderRadius: '8px', border: 'none', background: '#3b82f6', color: '#fff',
   fontSize: '13px', fontWeight: 600, cursor: 'pointer',
 }
 const btnSecondaryStyle: React.CSSProperties = {

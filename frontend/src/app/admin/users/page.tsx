@@ -105,7 +105,7 @@ export default function AdminUsersPage() {
                     <td style={tdStyle}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{
-                          width: 32, height: 32, borderRadius: '50%', background: 'var(--color-primary)',
+                          width: 32, height: 32, borderRadius: '50%', background: '#3b82f6',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           color: '#fff', fontSize: 13, fontWeight: 600,
                         }}>
@@ -132,7 +132,7 @@ export default function AdminUsersPage() {
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button
                           onClick={() => setEditingUser(u)}
-                          style={{ ...actionBtnStyle, color: 'var(--color-primary)' }}
+                          style={{ ...actionBtnStyle, color: '#3b82f6' }}
                         >
                           Edit
                         </button>
@@ -254,9 +254,9 @@ const thStyle: React.CSSProperties = { padding: '12px 16px', textAlign: 'left', 
 const tdStyle: React.CSSProperties = { padding: '14px 16px', fontSize: 14 }
 const badgeStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, border: '1px solid', textTransform: 'uppercase', letterSpacing: '0.3px' }
 const actionBtnStyle: React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, padding: '4px 8px' }
-const btnPrimaryStyle: React.CSSProperties = { padding: '9px 16px', borderRadius: 8, border: 'none', background: 'var(--color-primary)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }
+const btnPrimaryStyle: React.CSSProperties = { padding: '9px 16px', borderRadius: 8, border: 'none', background: '#3b82f6', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }
 const btnSecondaryStyle: React.CSSProperties = { padding: '9px 16px', borderRadius: 8, border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }
 const labelStyle: React.CSSProperties = { display: 'block', fontSize: 13, fontWeight: 500, color: 'var(--color-text-primary)', marginBottom: 6 }
 const inputStyle: React.CSSProperties = { width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text-primary)', fontSize: 14, outline: 'none', boxSizing: 'border-box' }
 const errorStyle: React.CSSProperties = { background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#ef4444', marginBottom: 16 }
-const spinnerStyle: React.CSSProperties = { width: 16, height: 16, border: '2px solid var(--color-border)', borderTopColor: 'var(--color-primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }
+const spinnerStyle: React.CSSProperties = { width: 16, height: 16, border: '2px solid var(--color-border)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }

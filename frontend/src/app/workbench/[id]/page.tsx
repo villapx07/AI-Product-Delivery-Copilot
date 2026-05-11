@@ -107,6 +107,18 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
 
   const autosaveTimer = useRef<NodeJS.Timeout | null>(null)
 
+  // Track generation start time for elapsed counter
+  const generationStartRef = useRef<Record<ModuleName, number | null>>({
+    'Epic Map': null,
+    'User Stories': null,
+    'QA Scenarios': null,
+    'Analytics': null,
+    'Risks': null,
+    'Review': null,
+  })
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const elapsedTimerRef = useRef<NodeJS.Timeout | null>(null)
+
   // Inputs state
   const [inputs, setInputs] = useState<DiscoveryInputs>({
     feature_title: workbench.title || '',
@@ -124,7 +136,17 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
       setModuleStates((s) => ({ ...s, 'Epic Map': { status: 'saved', data: state.epic_map, updatedAt: new Date().toISOString(), error: null } }))
     }
     if (state.user_stories) {
-      setModuleStates((s) => ({ ...s, 'User Stories': { status: 'saved', data: state.user_stories, updatedAt: new Date().toISOString(), error: null } }))
+      setModuleStates((s) => ({
+        ...s,
+        'User Stories': { status: 'saved', data: state.user_stories, updatedAt: new Date().toISOString(), error: null },
+        // Clear missing_prereq if user_stories were just restored
+        ...(s['QA Scenarios'].status === 'missing_prereq' && s['QA Scenarios'].error?.includes('User Stories')
+          ? { 'QA Scenarios': { ...s['QA Scenarios'], status: 'idle' } }
+          : {}),
+        ...(s['Analytics'].status === 'missing_prereq' && s['Analytics'].error?.includes('User Stories')
+          ? { 'Analytics': { ...s['Analytics'], status: 'idle' } }
+          : {}),
+      }))
     }
     if (state.qa_scenarios) {
       setModuleStates((s) => ({ ...s, 'QA Scenarios': { status: 'saved', data: state.qa_scenarios, updatedAt: new Date().toISOString(), error: null } }))
@@ -136,6 +158,13 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
       setModuleStates((s) => ({ ...s, 'Risks': { status: 'saved', data: state.risks, updatedAt: new Date().toISOString(), error: null } }))
     }
   }, [state])
+
+  // Cleanup elapsed timer on unmount
+  useEffect(() => {
+    return () => {
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+    }
+  }, [])
 
   // Trigger autosave on discovery inputs change
   const triggerAutosave = useCallback(
@@ -182,47 +211,82 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
         [module]: { status: 'generating', data: s[module].data, updatedAt: s[module].updatedAt, error: null },
       }))
 
+      // Start elapsed timer
+      generationStartRef.current[module] = Date.now()
+      setElapsedSeconds(0)
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+      elapsedTimerRef.current = setInterval(() => {
+        const start = generationStartRef.current[module]
+        if (start) setElapsedSeconds(Math.floor((Date.now() - start) / 1000))
+      }, 1000)
+
       try {
-        const stream = generateModuleStream(workbench.id, MODULE_KEYS[module], false)
-        const reader = stream.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
+        // Simple request-response approach: POST once, get full response
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${useAuthStore.getState().token}`,
+        }
+        const response = await fetch('/api/generate/modular', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ workbench_id: workbench.id, module: MODULE_KEYS[module], regenerate: false }),
+        })
 
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+        if (!response.ok) {
+          const errText = await response.text()
+          throw new Error(`Generation failed: ${response.status} — ${errText}`)
+        }
 
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
+        // Read the full SSE response as text
+        const text = await response.text()
+        // Parse SSE: events are separated by blank lines (\n\n)
+        // Each event block contains event: + data: on separate lines
+        const moduleKey = MODULE_KEYS[module]
+        let parsedData = null
+        const eventBlocks = text.split('\n\n')
+        for (const block of eventBlocks) {
+          const lines = block.split('\n')
+          let dataLine = ''
           for (const line of lines) {
             if (line.startsWith('data:')) {
-              const dataStr = line.slice(5).trim()
-              const parsed = parseModuleSSEFromText(dataStr)
-
-              if (parsed && parsed.module) {
-                // Save artifact immediately
-                await saveArtifact(workbench.id, MODULE_KEYS[module], parsed.data)
-
-                setModuleStates((s) => ({
-                  ...s,
-                  [module]: {
-                    status: 'saved',
-                    data: parsed.data,
-                    updatedAt: new Date().toISOString(),
-                    error: null,
-                  },
-                }))
-              }
+              dataLine = line.slice(5).trim()
+              break
             }
           }
+          if (!dataLine) continue
+          try {
+            const parsed = JSON.parse(dataLine)
+            if (parsed && typeof parsed === 'object' && moduleKey in parsed) {
+              parsedData = parsed[moduleKey]
+              break
+            }
+          } catch {}
         }
+
+        if (!parsedData) {
+          throw new Error('No valid data received from server')
+        }
+
+        // Save artifact
+        await saveArtifact(workbench.id, moduleKey, parsedData)
+
+        setModuleStates((s) => ({
+          ...s,
+          [module]: {
+            status: 'saved',
+            data: parsedData,
+            updatedAt: new Date().toISOString(),
+            error: null,
+          },
+        }))
+        if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
       } catch (err: any) {
+        console.error('[generateModule] error:', err)
         setModuleStates((s) => ({
           ...s,
           [module]: { ...s[module], status: 'error', error: err?.message || 'Generation failed' },
         }))
+        if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
       }
     },
     [workbench.id, moduleStates, saveArtifact],
@@ -235,46 +299,80 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
         [module]: { status: 'generating', data: s[module].data, updatedAt: s[module].updatedAt, error: null },
       }))
 
+      // Start elapsed timer
+      generationStartRef.current[module] = Date.now()
+      setElapsedSeconds(0)
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+      elapsedTimerRef.current = setInterval(() => {
+        const start = generationStartRef.current[module]
+        if (start) setElapsedSeconds(Math.floor((Date.now() - start) / 1000))
+      }, 1000)
+
       try {
-        const stream = generateModuleStream(workbench.id, MODULE_KEYS[module], true)
-        const reader = stream.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${useAuthStore.getState().token}`,
+        }
+        const response = await fetch('/api/generate/modular', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ workbench_id: workbench.id, module: MODULE_KEYS[module], regenerate: true }),
+        })
 
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+        if (!response.ok) {
+          const errText = await response.text()
+          throw new Error(`Regeneration failed: ${response.status} — ${errText}`)
+        }
 
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
+        // Read the full SSE response as text
+        const text = await response.text()
+        // Parse SSE: events are separated by blank lines (\n\n)
+        // Each event block contains event: + data: on separate lines
+        const moduleKey = MODULE_KEYS[module]
+        let parsedData = null
+        const eventBlocks = text.split('\n\n')
+        for (const block of eventBlocks) {
+          const lines = block.split('\n')
+          let dataLine = ''
           for (const line of lines) {
             if (line.startsWith('data:')) {
-              const dataStr = line.slice(5).trim()
-              const parsed = parseModuleSSEFromText(dataStr)
-
-              if (parsed && parsed.module) {
-                await saveArtifact(workbench.id, MODULE_KEYS[module], parsed.data)
-
-                setModuleStates((s) => ({
-                  ...s,
-                  [module]: {
-                    status: 'saved',
-                    data: parsed.data,
-                    updatedAt: new Date().toISOString(),
-                    error: null,
-                  },
-                }))
-              }
+              dataLine = line.slice(5).trim()
+              break
             }
           }
+          if (!dataLine) continue
+          try {
+            const parsed = JSON.parse(dataLine)
+            if (parsed && typeof parsed === 'object' && moduleKey in parsed) {
+              parsedData = parsed[moduleKey]
+              break
+            }
+          } catch {}
         }
+
+        if (!parsedData) {
+          throw new Error('No valid data received from server')
+        }
+
+        await saveArtifact(workbench.id, moduleKey, parsedData)
+
+        setModuleStates((s) => ({
+          ...s,
+          [module]: {
+            status: 'saved',
+            data: parsedData,
+            updatedAt: new Date().toISOString(),
+            error: null,
+          },
+        }))
+        if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
       } catch (err: any) {
+        console.error('[regenerateModule] error:', err)
         setModuleStates((s) => ({
           ...s,
           [module]: { ...s[module], status: 'error', error: err?.message || 'Regeneration failed' },
         }))
+        if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
       }
     },
     [workbench.id, saveArtifact],
@@ -284,7 +382,7 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
 
   const tabStatusColor = (tab: ModuleName): string => {
     const s = moduleStates[tab]
-    if (s.status === 'generating') return 'var(--color-primary)'
+    if (s.status === 'generating') return '#3b82f6'
     if (s.status === 'saved') return '#22c55e'
     if (s.status === 'error') return '#ef4444'
     if (s.status === 'missing_prereq') return '#f59e0b'
@@ -375,6 +473,7 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
               moduleStates={moduleStates}
               onGenerate={generateModule}
               onRegenerate={regenerateModule}
+              elapsedSeconds={elapsedSeconds}
             />
           </div>
         </div>
@@ -392,11 +491,13 @@ function ModuleContent({
   moduleStates,
   onGenerate,
   onRegenerate,
+  elapsedSeconds,
 }: {
   tab: ModuleName
   moduleStates: Record<ModuleName, ModuleState>
   onGenerate: (tab: ModuleName) => void
   onRegenerate: (tab: ModuleName) => void
+  elapsedSeconds: number
 }) {
   const s = moduleStates[tab]
 
@@ -412,22 +513,40 @@ function ModuleContent({
 
   // Status: generating
   if (s.status === 'generating') {
+    const mins = Math.floor(elapsedSeconds / 60)
+    const secs = elapsedSeconds % 60
+    const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
     return (
-      <div style={generatingStyle}>
-        <div style={spinnerStyle} />
-        <span style={{ fontSize: '14px', color: 'var(--color-text-secondary)' }}>Generating {tab}…</span>
+      <div style={{ ...generatingStyle, flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={spinnerStyle} />
+          <span style={{ fontSize: '14px', color: 'var(--color-text-secondary)' }}>Generating {tab}…</span>
+        </div>
+        <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', opacity: 0.7 }}>Elapsed: {timeStr}</span>
       </div>
     )
   }
 
   // Status: error
   if (s.status === 'error') {
+    const isTimeout = s.error?.includes('timed out') || s.error?.includes('timeout') || s.error?.includes('504') || s.error?.includes('net::ERR')
     return (
       <div style={errorStyle}>
-        <p style={{ margin: '0 0 12px', fontSize: '13px', color: '#ef4444' }}>Error: {s.error}</p>
-        <button onClick={() => onRegenerate(tab)} style={regenBtnStyle}>
-          Try again
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: '16px' }}>⚠️</span>
+            <span style={{ fontSize: '13px', color: '#ef4444', fontWeight: 500 }}>Generation Failed</span>
+          </div>
+          {isTimeout && (
+            <p style={{ margin: '0 0 4px', fontSize: '12px', color: '#f59e0b' }}>
+              ⏱ The request timed out. The AI may still be processing — please try regenerating.
+            </p>
+          )}
+          <p style={{ margin: isTimeout ? '0 0 12px' : '0 0 12px', fontSize: '13px', color: '#ef4444' }}>{s.error}</p>
+          <button onClick={() => onRegenerate(tab)} style={regenBtnStyle}>
+            Try again
+          </button>
+        </div>
       </div>
     )
   }
@@ -550,7 +669,7 @@ function AIReviewOutput({ data, onRegenerate }: { data: any[]; onRegenerate: () 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <span style={{
               fontSize: '11px', fontWeight: 600, padding: '2px 8px',
-              borderRadius: 20, background: 'var(--color-primary)', color: '#fff',
+              borderRadius: 20, background: '#3b82f6', color: '#fff',
               textTransform: 'uppercase',
             }}>
               {item.severity || item.type || 'Note'}
@@ -583,7 +702,7 @@ const centerStyle: React.CSSProperties = {
 }
 const spinnerStyle: React.CSSProperties = {
   width: 20, height: 20, border: '2px solid var(--color-border)',
-  borderTopColor: 'var(--color-primary)', borderRadius: '50%',
+  borderTopColor: '#3b82f6', borderRadius: '50%',
   animation: 'spin 0.8s linear infinite',
 }
 const topBarStyle: React.CSSProperties = {
@@ -629,7 +748,7 @@ const errorStyle: React.CSSProperties = {
 }
 const generateBtnStyle: React.CSSProperties = {
   padding: '9px 18px', borderRadius: 8, border: 'none',
-  background: 'var(--color-primary)', color: '#fff',
+  background: '#3b82f6', color: '#fff',
   fontSize: '13px', fontWeight: 600, cursor: 'pointer',
 }
 const regenBtnStyle: React.CSSProperties = {
