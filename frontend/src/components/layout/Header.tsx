@@ -11,12 +11,12 @@ interface HeaderProps {
   onOpenSettings?: () => void
 }
 
-export function Header({ projectTitle = 'AI Product Delivery Copilot', onExportAll, onOpenSettings }: HeaderProps) {
+export function Header({ projectTitle = 'Forge - Delivery', onExportAll, onOpenSettings }: HeaderProps) {
   return (
     <header className="h-14 bg-surface border-b border-border flex items-center justify-between px-4 shrink-0">
       <div className="flex items-center gap-3">
-        <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
-          <Zap className="w-4 h-4 text-white" />
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden">
+          <img src="/forge-logo.png" alt="Forge" className="w-full h-full object-contain" />
         </div>
         <div>
           <h1 className="text-sm font-semibold text-text-primary">{projectTitle}</h1>

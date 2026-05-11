@@ -127,7 +127,7 @@ export default function HowToUsePage() {
       <div className="max-w-4xl mx-auto px-6 py-10">
         {/* Hero */}
         <div className="mb-12">
-          <h1 className="text-3xl font-bold text-text-primary mb-3">AI Product Delivery Copilot</h1>
+          <h1 className="text-3xl font-bold text-text-primary mb-3">Forge - Delivery</h1>
           <p className="text-text-secondary text-base leading-relaxed">
             Generate complete product delivery artifacts — epics, user stories, QA scenarios, analytics events, and risk assessments — from a single feature description. Follow the steps below to get started.
           </p>
@@ -224,7 +224,7 @@ export default function HowToUsePage() {
         {/* Footer */}
         <div className="mt-16 pt-6 border-t border-border text-center">
           <p className="text-xs text-text-secondary/50">
-            AI Product Delivery Copilot ·{' '}
+            Forge - Delivery ·{' '}
             <a
               href="https://github.com/villapx07/AI-Product-Delivery-Copilot"
               target="_blank"
