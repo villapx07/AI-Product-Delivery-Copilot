@@ -96,6 +96,7 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
 
   const [activeTab, setActiveTab] = useState<ModuleName>('Epic Map')
   const [autosaveStatus, setAutosaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [generatingModal, setGeneratingModal] = useState<ModuleName | null>(null)
   const [moduleStates, setModuleStates] = useState<Record<ModuleName, ModuleState>>({
     'Epic Map': { status: 'idle', data: null, updatedAt: null, error: null },
     'User Stories': { status: 'idle', data: null, updatedAt: null, error: null },
@@ -210,8 +211,7 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
         ...s,
         [module]: { status: 'generating', data: s[module].data, updatedAt: s[module].updatedAt, error: null },
       }))
-
-      // Start elapsed timer
+      setGeneratingModal(module)
       generationStartRef.current[module] = Date.now()
       setElapsedSeconds(0)
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
@@ -280,6 +280,7 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
           },
         }))
         if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
+        setGeneratingModal(null)
       } catch (err: any) {
         console.error('[generateModule] error:', err)
         setModuleStates((s) => ({
@@ -287,6 +288,7 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
           [module]: { ...s[module], status: 'error', error: err?.message || 'Generation failed' },
         }))
         if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
+        setGeneratingModal(null)
       }
     },
     [workbench.id, moduleStates, saveArtifact],
@@ -298,8 +300,7 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
         ...s,
         [module]: { status: 'generating', data: s[module].data, updatedAt: s[module].updatedAt, error: null },
       }))
-
-      // Start elapsed timer
+      setGeneratingModal(module)
       generationStartRef.current[module] = Date.now()
       setElapsedSeconds(0)
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
@@ -366,6 +367,7 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
           },
         }))
         if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
+        setGeneratingModal(null)
       } catch (err: any) {
         console.error('[regenerateModule] error:', err)
         setModuleStates((s) => ({
@@ -373,12 +375,58 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
           [module]: { ...s[module], status: 'error', error: err?.message || 'Regeneration failed' },
         }))
         if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
+        setGeneratingModal(null)
       }
     },
-    [workbench.id, saveArtifact],
+    [workbench.id, moduleStates, saveArtifact],
   )
 
   // ── Module tab style helper ─────────────────────────────────────────────────
+
+  const handleAddEpic = useCallback((newEpic: Epic) => {
+    setModuleStates((s) => {
+      const current = (s['Epic Map'].data as Epic[]) || []
+      return {
+        ...s,
+        'Epic Map': {
+          ...s['Epic Map'],
+          data: [...current, newEpic],
+          status: 'saved',
+        },
+      }
+    })
+    // Also save to backend
+    saveArtifact(workbench.id, 'epic_map', [
+      ...((moduleStates['Epic Map'].data as Epic[]) || []),
+      newEpic,
+    ])
+  }, [workbench.id, moduleStates, saveArtifact])
+
+  const handleAddStory = useCallback(() => {
+    const newStory: UserStory = {
+      id: `story-${Date.now()}`,
+      epicId: '',
+      user: 'User',
+      goal: 'Goal',
+      benefit: 'Benefit',
+      criteria: [],
+    }
+    setModuleStates((s) => {
+      const current = (s['User Stories'].data as UserStory[]) || []
+      return {
+        ...s,
+        'User Stories': {
+          ...s['User Stories'],
+          data: [...current, newStory],
+          status: 'saved',
+        },
+      }
+    })
+    saveArtifact(workbench.id, 'user_stories', [
+      ...((moduleStates['User Stories'].data as UserStory[]) || []),
+      newStory,
+    ])
+  }, [workbench.id, moduleStates, saveArtifact])
 
   const tabStatusColor = (tab: ModuleName): string => {
     const s = moduleStates[tab]
@@ -474,10 +522,57 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
               onGenerate={generateModule}
               onRegenerate={regenerateModule}
               elapsedSeconds={elapsedSeconds}
+              onAddEpic={handleAddEpic}
+              onAddStory={handleAddStory}
             />
           </div>
         </div>
       </div>
+
+      {/* Generating modal */}
+      {generatingModal && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+            borderRadius: 16, padding: '32px 40px', minWidth: 300,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+          }}>
+            {/* Animated ring + progress bar */}
+            <div style={{ position: 'relative', width: 64, height: 64 }}>
+              <svg style={{ width: 64, height: 64, transform: 'rotate(-90deg)' }} viewBox="0 0 64 64">
+                <circle cx="32" cy="32" r="26" fill="none" stroke="var(--color-border)" strokeWidth="4" />
+                <circle
+                  cx="32" cy="32" r="26" fill="none"
+                  stroke="#3b82f6" strokeWidth="4"
+                  strokeDasharray={`${2 * Math.PI * 26}`}
+                  strokeDashoffset={`${2 * Math.PI * 26 * (1 - (elapsedSeconds % 60) / 60)}`}
+                  strokeLinecap="round"
+                  style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+                />
+              </svg>
+              <div style={{
+                position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', fontSize: 20, fontWeight: 700, color: '#3b82f6',
+              }}>
+                {elapsedSeconds}
+              </div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                Generating {generatingModal}…
+              </p>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                {Math.floor(elapsedSeconds / 60)}m {elapsedSeconds % 60}s elapsed
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
@@ -492,12 +587,16 @@ function ModuleContent({
   onGenerate,
   onRegenerate,
   elapsedSeconds,
+  onAddEpic,
+  onAddStory,
 }: {
   tab: ModuleName
   moduleStates: Record<ModuleName, ModuleState>
   onGenerate: (tab: ModuleName) => void
   onRegenerate: (tab: ModuleName) => void
   elapsedSeconds: number
+  onAddEpic?: (epic: Epic) => void
+  onAddStory?: () => void
 }) {
   const s = moduleStates[tab]
 
@@ -588,6 +687,7 @@ function ModuleContent({
         <EpicMap
           data={(s.data as Epic[]) || []}
           onEdit={() => {}}
+          onAddEpic={onAddEpic}
           onRegenerate={() => onRegenerate(tab)}
           isRegenerating={false}
         />
@@ -596,6 +696,7 @@ function ModuleContent({
         <UserStories
           data={(s.data as UserStory[]) || []}
           onEdit={() => {}}
+          onAddStory={onAddStory}
           onAddCriterion={() => {}}
           onRemoveCriterion={() => {}}
           onRegenerate={() => onRegenerate(tab)}

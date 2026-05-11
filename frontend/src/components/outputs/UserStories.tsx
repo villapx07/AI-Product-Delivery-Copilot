@@ -22,18 +22,19 @@ export interface UserStory {
 interface UserStoriesProps {
   data: UserStory[]
   onEdit: (storyId: string, field: string, value: string) => void
+  onAddStory?: () => void
   onAddCriterion: (storyId: string) => void
   onRemoveCriterion: (storyId: string, criterionId: string) => void
   onRegenerate: () => void
   isRegenerating: boolean
 }
 
-export function UserStories({ data, onEdit, onAddCriterion, onRemoveCriterion, isRegenerating, onRegenerate }: UserStoriesProps) {
+export function UserStories({ data, onEdit, onAddStory, onAddCriterion, onRemoveCriterion, isRegenerating, onRegenerate }: UserStoriesProps) {
   const [copied, setCopied] = React.useState(false)
 
   const handleCopy = () => {
     const text = data.map((s, i) =>
-      `### User Story ${i + 1}\n**As a** ${s.user}\n**I want** ${s.goal}\n**So that** ${s.benefit}\n\n**Acceptance Criteria:**\n${s.criteria.map(c => `- [${c.type}] ${c.text}`).join('\n')}`
+      `### User Story ${i + 1}\n**As a** ${s.user}\n**I want** ${s.goal}\n**So that** ${s.benefit}\n\n**Acceptance Criteria:**\n${(s.criteria || []).map(c => `- [${c.type}] ${c.text}`).join('\n')}`
     ).join('\n\n')
     navigator.clipboard.writeText(text)
     setCopied(true)
@@ -50,8 +51,13 @@ export function UserStories({ data, onEdit, onAddCriterion, onRemoveCriterion, i
 
   if (data.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-center">
+      <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
         <p className="text-sm text-text-secondary">No user stories generated yet.</p>
+        {onAddStory && (
+          <button onClick={onAddStory} className="text-xs text-accent hover:text-accent/80 font-medium">
+            + Add User Story manually
+          </button>
+        )}
       </div>
     )
   }
@@ -61,6 +67,12 @@ export function UserStories({ data, onEdit, onAddCriterion, onRemoveCriterion, i
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text-primary">User Stories</h2>
         <div className="flex items-center gap-1">
+          {onAddStory && (
+            <Button variant="ghost" size="sm" onClick={onAddStory}>
+              <Plus className="w-3.5 h-3.5" />
+              Add Story
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={handleCopy}>
             <Copy className="w-3.5 h-3.5" />
             {copied ? 'Copied!' : 'Copy'}
@@ -131,7 +143,7 @@ export function UserStories({ data, onEdit, onAddCriterion, onRemoveCriterion, i
               <div>
                 <p className="text-xs font-medium text-text-secondary mb-2">ACCEPTANCE CRITERIA</p>
                 <div className="flex flex-col gap-1.5">
-                  {story.criteria.map((c) => (
+                  {(story.criteria || []).map((c) => (
                     <div key={c.id} className="flex items-start gap-2">
                       <span className={cn('text-xs font-bold mt-0.5', criterionTypeColors[c.type])}>
                         {criterionLabel[c.type]}

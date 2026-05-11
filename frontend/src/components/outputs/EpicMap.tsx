@@ -3,7 +3,7 @@
 import * as React from 'react'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { RefreshCw, Copy, Download } from 'lucide-react'
+import { RefreshCw, Copy, Download, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export interface Epic {
@@ -18,11 +18,12 @@ export interface Epic {
 interface EpicMapProps {
   data: Epic[]
   onEdit: (id: string, field: keyof Epic, value: string) => void
+  onAddEpic?: (epic: Epic) => void
   onRegenerate: () => void
   isRegenerating: boolean
 }
 
-export function EpicMap({ data, onEdit, isRegenerating, onRegenerate }: EpicMapProps) {
+export function EpicMap({ data, onEdit, onAddEpic, isRegenerating, onRegenerate }: EpicMapProps) {
   const [copied, setCopied] = React.useState(false)
 
   const priorityColors = {
@@ -53,6 +54,17 @@ export function EpicMap({ data, onEdit, isRegenerating, onRegenerate }: EpicMapP
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text-primary">Epic Map</h2>
         <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" onClick={() => onAddEpic?.({
+              id: `epic-${Date.now()}`,
+              title: 'New Epic',
+              description: '',
+              teams: [],
+              dependencies: '',
+              priority: 'P2' as const,
+            })}>
+            <Plus className="w-3.5 h-3.5" />
+            Add Epic
+          </Button>
           <Button variant="ghost" size="sm" onClick={handleCopy}>
             <Copy className="w-3.5 h-3.5" />
             {copied ? 'Copied!' : 'Copy'}
