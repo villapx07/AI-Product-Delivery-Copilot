@@ -1,9 +1,10 @@
 /**
- * Auth store — Zustand
+ * Auth store — Zustand with localStorage persistence
  * Holds user session state (non-server state).
  * Auth API calls go through React Query; this store mirrors auth state for UI.
  */
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 interface User {
   id: string
@@ -26,34 +27,56 @@ interface AuthState {
   setUser: (user: User) => void
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  token: null,
-  isAuthenticated: false,
-
-  login: (user, token) =>
-    set({
-      user,
-      token,
-      isAuthenticated: true,
-    }),
-
-  logout: () =>
-    set({
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
       user: null,
       token: null,
       isAuthenticated: false,
-    }),
 
-  setUser: (user) =>
-    set({
-      user,
-      isAuthenticated: true,  // if user is set, must also be authenticated
+      login: (user, token) =>
+        set({
+          user,
+          token,
+          isAuthenticated: true,
+        }),
+
+      logout: () =>
+        set({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+        }),
+
+      setUser: (user) =>
+        set({
+          user,
+          isAuthenticated: true,
+        }),
     }),
-}))
+    {
+      name: 'forge-auth', // localStorage key
+      partialize: (state) => ({
+        user: state.user,
+        token: state.token,
+        isAuthenticated: state.isAuthenticated,
+      }),
+    }
+  )
+)
 
 // Helpers
 export function getToken(): string | null {
+  // For use in API layer (runs outside React) — read from localStorage directly
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('forge-auth')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        return parsed.state?.token ?? null
+      }
+    } catch {}
+  }
   return useAuthStore.getState().token
 }
 
