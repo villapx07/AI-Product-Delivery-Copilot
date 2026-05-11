@@ -1,20 +1,19 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
 import { workbenchesApi, artifactsApi } from '@/lib/api'
-import { GeneratorProvider } from '@/context/GeneratorContext'
 import { DiscoveryForm, type DiscoveryInputs } from '@/components/inputs/DiscoveryForm'
 import { FileUpload } from '@/components/inputs/FileUpload'
-import { EpicMap, type Epic } from '@/components/outputs/EpicMap'
-import { UserStories, type UserStory } from '@/components/outputs/UserStories'
+import { EpicMap } from '@/components/outputs/EpicMap'
+import { UserStories } from '@/components/outputs/UserStories'
 import { QAScenarios } from '@/components/outputs/QAScenarios'
 import { Risks } from '@/components/outputs/Risks'
 import { AnalyticsEvents } from '@/components/outputs/AnalyticsEvents'
 import { useWorkbench } from '@/hooks/useWorkbench'
-import type { ModuleName, ModuleState } from '@/hooks/useGeneration'
+import type { ModuleName } from '@/hooks/useGeneration'
 
 interface UploadedFile { id: string; name: string; size: number; preview?: string; data: string }
 
@@ -52,18 +51,22 @@ export default function WorkbenchPage() {
   }
 
   return (
-    <GeneratorProvider workbenchId={workbenchId} initialArtifacts={artifactsData?.artifacts || []}>
-      <WorkbenchShell workbench={workbenchData} workbenchId={workbenchId} />
-    </GeneratorProvider>
+    <WorkbenchShell
+      workbench={workbenchData}
+      workbenchId={workbenchId}
+      initialArtifacts={artifactsData?.artifacts || []}
+    />
   )
 }
 
-// ── Inner shell — all state managed via useWorkbench hook ───────────────────
+// ── Inner shell ──────────────────────────────────────────────────────────────
 
-function WorkbenchShell({ workbench, workbenchId }: { workbench: any; workbenchId: string }) {
+function WorkbenchShell({ workbench, workbenchId, initialArtifacts }: {
+  workbench: any; workbenchId: string; initialArtifacts: any[]
+}) {
   const router = useRouter()
 
-  const wb = useWorkbench({ workbenchId, workbench, initialArtifacts: [] })
+  const wb = useWorkbench({ workbenchId, workbench, initialArtifacts })
 
   const [inputs, setInputs] = useState<DiscoveryInputs>({
     feature_title: workbench.title || '',
@@ -137,10 +140,13 @@ function WorkbenchShell({ workbench, workbenchId }: { workbench: any; workbenchI
               <button
                 key={tab}
                 onClick={() => wb.setActiveTab(tab)}
-                style={{ ...tabBtnStyle, ...(wb.activeTab === tab ? tabBtnActiveStyle : {}), position: 'relative' }}
+                style={{ ...tabBtnStyle, ...(wb.activeTab === tab ? tabBtnActiveStyle : {}) }}
               >
                 {tab}
-                <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: tabStatusColor(tab), marginLeft: 4, verticalAlign: 'middle' }} />
+                <span style={{
+                  display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+                  background: tabStatusColor(tab), marginLeft: 4, verticalAlign: 'middle'
+                }} />
               </button>
             ))}
           </div>
@@ -153,41 +159,76 @@ function WorkbenchShell({ workbench, workbenchId }: { workbench: any; workbenchI
               onGenerate={wb.generateModule}
               onRegenerate={wb.regenerateModule}
               elapsedSeconds={wb.elapsedSeconds}
+              // Epic
               onAddEpic={wb.addEpic}
               onDeleteEpic={wb.deleteEpic}
+              // Story
               onAddStory={wb.addStory}
               onDeleteStory={wb.deleteStory}
+              // QA
+              onAddScenario={wb.addScenario}
+              onDeleteScenario={wb.deleteScenario}
+              onEditScenario={wb.editScenario}
+              // Analytics
+              onAddEvent={wb.addEvent}
+              onDeleteEvent={wb.deleteEvent}
+              onEditEvent={wb.editEvent}
+              // Risks
+              onAddRisk={wb.addRisk}
+              onDeleteRisk={wb.deleteRisk}
+              onEditRisk={wb.editRisk}
             />
           </div>
         </div>
       </div>
 
-      {/* Generating modal */}
-      {wb.generatingModal && <GeneratingModal module={wb.generatingModal} elapsedSeconds={wb.elapsedSeconds} />}
+      {/* Generating overlay modal — shown for ALL modules */}
+      {wb.generatingModal && (
+        <GeneratingModal module={wb.generatingModal} elapsedSeconds={wb.elapsedSeconds} />
+      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
 
-// ── Module content renderer ───────────────────────────────────────────────────
+// ── Module content renderer — consistent for all tabs ─────────────────────────
 
 function ModuleContent({
   tab, moduleStates, onGenerate, onRegenerate, elapsedSeconds,
-  onAddEpic, onDeleteEpic, onAddStory, onDeleteStory,
+  onAddEpic, onDeleteEpic,
+  onAddStory, onDeleteStory,
+  onAddScenario, onDeleteScenario, onEditScenario,
+  onAddEvent, onDeleteEvent, onEditEvent,
+  onAddRisk, onDeleteRisk, onEditRisk,
 }: {
   tab: ModuleName
-  moduleStates: Record<ModuleName, ModuleState>
+  moduleStates: Record<ModuleName, any>
   onGenerate: (tab: ModuleName) => void
   onRegenerate: (tab: ModuleName) => void
   elapsedSeconds: number
-  onAddEpic?: (epic: Epic) => void
-  onDeleteEpic?: (id: string) => void
-  onAddStory?: (epicId: string) => void
-  onDeleteStory?: (storyId: string) => void
+  // Epic
+  onAddEpic: (epic: any) => void
+  onDeleteEpic: (id: string) => void
+  // Story
+  onAddStory: (epicId: string) => void
+  onDeleteStory: (storyId: string) => void
+  // QA
+  onAddScenario: (type: any) => void
+  onDeleteScenario: (id: string) => void
+  onEditScenario: (id: string, field: string, value: string) => void
+  // Analytics
+  onAddEvent: () => void
+  onDeleteEvent: (id: string) => void
+  onEditEvent: (id: string, field: string, value: string) => void
+  // Risks
+  onAddRisk: () => void
+  onDeleteRisk: (id: string) => void
+  onEditRisk: (id: string, field: string, value: string) => void
 }) {
   const s = moduleStates[tab]
 
+  // ── Missing prerequisite ────────────────────────────────────────────────
   if (s.status === 'missing_prereq') {
     return (
       <div style={prereqStyle}>
@@ -197,6 +238,7 @@ function ModuleContent({
     )
   }
 
+  // ── Generating — consistent inline indicator (blur modal handled by page.tsx) ──
   if (s.status === 'generating') {
     const mins = Math.floor(elapsedSeconds / 60)
     const secs = elapsedSeconds % 60
@@ -213,8 +255,10 @@ function ModuleContent({
     )
   }
 
+  // ── Error ────────────────────────────────────────────────────────────────
   if (s.status === 'error') {
-    const isTimeout = s.error?.includes('timed out') || s.error?.includes('timeout') || s.error?.includes('504') || s.error?.includes('net::ERR')
+    const isTimeout = s.error?.includes('timed out') || s.error?.includes('timeout') ||
+      s.error?.includes('504') || s.error?.includes('net::ERR')
     return (
       <div style={errorStyle}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -224,7 +268,7 @@ function ModuleContent({
           </div>
           {isTimeout && (
             <p style={{ margin: '0 0 4px', fontSize: '12px', color: '#f59e0b' }}>
-              ⏱ The request timed out. The AI may still be processing — please try regenerating.
+              ⏱ Request timed out. The AI may still be processing — please try regenerating.
             </p>
           )}
           <p style={{ margin: isTimeout ? '0 0 12px' : '0 0 12px', fontSize: '13px', color: '#ef4444' }}>{s.error}</p>
@@ -234,6 +278,7 @@ function ModuleContent({
     )
   }
 
+  // ── Idle — never generated ──────────────────────────────────────────────
   if (s.status === 'idle' && !s.data) {
     return (
       <div style={idleStyle}>
@@ -243,24 +288,81 @@ function ModuleContent({
     )
   }
 
+  // ── Saved / has data — render the component ───────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      {/* Header bar */}
+      {/* Header bar — consistent across all tabs */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: '12px', color: '#22c55e' }}>✓ Saved</span>
-          {s.updatedAt && <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Updated {new Date(s.updatedAt).toLocaleTimeString()}</span>}
+          {s.updatedAt && (
+            <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+              Updated {new Date(s.updatedAt).toLocaleTimeString()}
+            </span>
+          )}
         </div>
         <button onClick={() => onRegenerate(tab)} style={regenBtnStyle}>Regenerate</button>
       </div>
 
-      {/* Module-specific output */}
-      {tab === 'Epic Map' && <EpicMap data={(s.data as Epic[]) || []} onEdit={() => {}} onAddEpic={onAddEpic} onDeleteEpic={onDeleteEpic} onRegenerate={() => onRegenerate(tab)} isRegenerating={false} />}
-      {tab === 'User Stories' && <UserStories data={(s.data as UserStory[]) || []} onEdit={() => {}} onAddStory={onAddStory} onDeleteStory={onDeleteStory} onAddCriterion={() => {}} onRemoveCriterion={() => {}} onRegenerate={() => onRegenerate(tab)} isRegenerating={false} />}
-      {tab === 'QA Scenarios' && <QAScenarios data={(s.data as any[]) || []} onEdit={() => {}} onAddScenario={() => {}} onRemoveScenario={() => {}} onRegenerate={() => onRegenerate(tab)} isRegenerating={false} />}
-      {tab === 'Analytics' && <AnalyticsEvents data={(s.data as any[]) || []} onEdit={() => {}} onAddEvent={() => {}} onRemoveEvent={() => {}} onRegenerate={() => onRegenerate(tab)} isRegenerating={false} />}
-      {tab === 'Risks' && <Risks data={(s.data as any[]) || []} onEdit={() => {}} onAddRisk={() => {}} onRemoveRisk={() => {}} onRegenerate={() => onRegenerate(tab)} isRegenerating={false} />}
-      {tab === 'Review' && <AIReviewOutput data={(s.data as any[]) || []} onRegenerate={() => onRegenerate(tab)} />}
+      {/* Tab-specific output */}
+      {tab === 'Epic Map' && (
+        <EpicMap
+          data={s.data || []}
+          onEdit={() => {}}
+          onAddEpic={onAddEpic}
+          onDeleteEpic={onDeleteEpic}
+          onRegenerate={() => onRegenerate(tab)}
+          isRegenerating={false}
+        />
+      )}
+      {tab === 'User Stories' && (
+        <UserStories
+          data={s.data || []}
+          onEdit={() => {}}
+          onAddStory={onAddStory}
+          onDeleteStory={onDeleteStory}
+          onAddCriterion={() => {}}
+          onRemoveCriterion={() => {}}
+          onRegenerate={() => onRegenerate(tab)}
+          isRegenerating={false}
+        />
+      )}
+      {tab === 'QA Scenarios' && (
+        <QAScenarios
+          data={s.data || []}
+          onEdit={onEditScenario}
+          onAddScenario={onAddScenario}
+          onRemoveScenario={onDeleteScenario}
+          onRegenerate={() => onRegenerate(tab)}
+          isRegenerating={false}
+        />
+      )}
+      {tab === 'Analytics' && (
+        <AnalyticsEvents
+          data={s.data || []}
+          onEdit={onEditEvent}
+          onAddEvent={onAddEvent}
+          onRemoveEvent={onDeleteEvent}
+          onRegenerate={() => onRegenerate(tab)}
+          isRegenerating={false}
+        />
+      )}
+      {tab === 'Risks' && (
+        <Risks
+          data={s.data || []}
+          onEdit={onEditRisk}
+          onAddRisk={onAddRisk}
+          onRemoveRisk={onDeleteRisk}
+          onRegenerate={() => onRegenerate(tab)}
+          isRegenerating={false}
+        />
+      )}
+      {tab === 'Review' && (
+        <AIReviewOutput
+          data={s.data || []}
+          onRegenerate={() => onRegenerate(tab)}
+        />
+      )}
     </div>
   )
 }
@@ -297,33 +399,53 @@ function AIReviewOutput({ data, onRegenerate }: { data: any[]; onRegenerate: () 
   )
 }
 
-// ── Generating modal ─────────────────────────────────────────────────────────
+// ── Generating modal — blur overlay for ALL modules ───────────────────────────
 
 function GeneratingModal({ module, elapsedSeconds }: { module: ModuleName; elapsedSeconds: number }) {
   const mins = Math.floor(elapsedSeconds / 60)
   const secs = elapsedSeconds % 60
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 16, padding: '32px 40px', minWidth: 300, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+        borderRadius: 16, padding: '32px 40px', minWidth: 300,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+      }}>
         <div style={{ position: 'relative', width: 64, height: 64 }}>
           <svg style={{ width: 64, height: 64, transform: 'rotate(-90deg)' }} viewBox="0 0 64 64">
             <circle cx="32" cy="32" r="26" fill="none" stroke="var(--color-border)" strokeWidth="4" />
-            <circle cx="32" cy="32" r="26" fill="none" stroke="#3b82f6" strokeWidth="4" strokeDasharray={`${2 * Math.PI * 26}`} strokeDashoffset={`${2 * Math.PI * 26 * (1 - (elapsedSeconds % 60) / 60)}`} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 0.5s ease' }} />
+            <circle
+              cx="32" cy="32" r="26" fill="none" stroke="#3b82f6" strokeWidth="4"
+              strokeDasharray={`${2 * Math.PI * 26}`}
+              strokeDashoffset={`${2 * Math.PI * 26 * (1 - Math.min(elapsedSeconds % 60, 59) / 60)}`}
+              strokeLinecap="round"
+              style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+            />
           </svg>
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, color: '#3b82f6' }}>
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', fontSize: 20, fontWeight: 700, color: '#3b82f6',
+          }}>
             {elapsedSeconds}
           </div>
         </div>
         <div style={{ textAlign: 'center' }}>
           <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)' }}>Generating {module}…</p>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--color-text-secondary)' }}>{mins > 0 ? `${mins}m ${secs}s` : `${secs}s`} elapsed</p>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--color-text-secondary)' }}>
+            {mins > 0 ? `${mins}m ${secs}s` : `${secs}s`} elapsed
+          </p>
         </div>
       </div>
     </div>
   )
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
+// ── Styles ───────────────────────────────────────────────────────────────────
 
 const centerStyle: React.CSSProperties = { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, background: 'var(--color-bg)' }
 const spinnerStyle: React.CSSProperties = { width: 20, height: 20, border: '2px solid var(--color-border)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }

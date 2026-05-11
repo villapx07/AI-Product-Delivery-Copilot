@@ -2,16 +2,40 @@
 
 /**
  * useWorkbench — primary hook for the workbench page.
- * Consolidates all state management into one place so page.tsx stays thin.
+ * All state lives here so page.tsx stays thin.
  *
- * Usage:
- *   const wb = useWorkbench(workbenchId, workbench, initialArtifacts)
- *   wb.generateModule('Epic Map')
- *   wb.updateModuleState('Epic Map', { status: 'saved', data: [...] })
+ * Responsibilities:
+ *  - Per-module generation with elapsed-timer
+ *  - Per-module state (idle/generating/saved/error/missing_prereq)
+ *  - Generating modal (blurred overlay) during generation — ALL modules
+ *  - Autosave of discovery inputs
+ *  - Artifact CRUD (add/edit/delete) for all module types
  */
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { ModuleName, ModuleState, useGeneration } from './useGeneration'
+import { useAuthStore } from '@/store/authStore'
+import { artifactsApi } from '@/lib/api'
+import type { ModuleName, ModuleState } from '@/hooks/useGeneration'
 import type { Epic, UserStory } from '@/components/outputs/EpicMap'
+
+// ── Module config ────────────────────────────────────────────────────────────
+
+const MODULE_KEY_MAP: Record<ModuleName, string> = {
+  'Epic Map': 'epic_map',
+  'User Stories': 'user_stories',
+  'QA Scenarios': 'qa_scenarios',
+  'Analytics': 'analytics',
+  'Risks': 'risks',
+  'Review': 'reviewer',
+}
+
+const PREREQUISITES: Record<ModuleName, ModuleName[]> = {
+  'Epic Map': [],
+  'User Stories': ['Epic Map'],
+  'QA Scenarios': ['User Stories'],
+  'Analytics': ['User Stories'],
+  'Risks': ['Epic Map', 'User Stories'],
+  'Review': ['Epic Map', 'User Stories', 'QA Scenarios', 'Analytics', 'Risks'],
+}
 
 const DEFAULT_STATES = (): Record<ModuleName, ModuleState> => ({
   'Epic Map':     { status: 'idle', data: null, updatedAt: null, error: null },
@@ -22,10 +46,12 @@ const DEFAULT_STATES = (): Record<ModuleName, ModuleState> => ({
   'Review':      { status: 'idle', data: null, updatedAt: null, error: null },
 })
 
-export interface UseWorkbenchOptions {
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface UseWorkbenchOptions {
   workbenchId: string
   workbench: Record<string, unknown>
-  initialArtifacts?: Record<string, unknown>[]
+  initialArtifacts?: Array<{ artifact_type: string; data: unknown }>
 }
 
 export interface UseWorkbenchReturn {
@@ -35,26 +61,42 @@ export interface UseWorkbenchReturn {
   generatingModal: ModuleName | null
   elapsedSeconds: number
 
-  // Tab management
   setActiveTab: (tab: ModuleName) => void
+  updateModuleState: (module: ModuleName, partial: Partial<ModuleState>) => void
 
-  // State mutation (for page.tsx to call after generation)
-  updateModuleState: (module: ModuleName, state: Partial<ModuleState>) => void
-
-  // Generation
+  // Generation — elapsed timer managed inside, blur overlay shown for ALL modules
   generateModule: (module: ModuleName) => Promise<void>
   regenerateModule: (module: ModuleName) => Promise<void>
 
-  // Artifact edits
+  // Epic
   addEpic: (epic: Epic) => void
   deleteEpic: (epicId: string) => void
+
+  // User Story
   addStory: (epicId: string) => void
   deleteStory: (storyId: string) => void
+
+  // QA Scenarios
+  addScenario: (type: 'positive' | 'negative' | 'edge' | 'validation') => void
+  deleteScenario: (id: string) => void
+  editScenario: (id: string, field: string, value: string) => void
+
+  // Analytics
+  addEvent: () => void
+  deleteEvent: (id: string) => void
+  editEvent: (id: string, field: string, value: string) => void
+
+  // Risks
+  addRisk: () => void
+  deleteRisk: (id: string) => void
+  editRisk: (id: string, field: string, value: string) => void
 
   // Autosave
   triggerAutosave: (inputs: Record<string, unknown>) => void
   clearAutosaveStatus: () => void
 }
+
+// ── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: UseWorkbenchOptions): UseWorkbenchReturn {
   const [moduleStates, setModuleStates] = useState<Record<ModuleName, ModuleState>>(DEFAULT_STATES)
@@ -63,50 +105,171 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
   const [generatingModal, setGeneratingModal] = useState<ModuleName | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
 
-  const autosaveTimer = useRef<NodeJS.Timeout | null>(null)
-  const elapsedTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const generationStartRef = useRef<Partial<Record<ModuleName, number | null>>>({})
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const generationStartRef = useRef<number | null>(null)
 
-  const { generate, saveArtifact } = useGeneration(moduleStates)
-
-  // Restore artifacts on mount
+  // Restore saved artifacts on mount
   useEffect(() => {
     if (!initialArtifacts || initialArtifacts.length === 0) return
 
     setModuleStates((s) => {
       const next = { ...s }
-      for (const a of initialArtifacts as Array<{ artifact_type: string; data: unknown }>) {
-        const map: Record<string, ModuleName> = {
-          epic_map: 'Epic Map',
-          user_stories: 'User Stories',
-          qa_scenarios: 'QA Scenarios',
-          analytics: 'Analytics',
-          risks: 'Risks',
-          reviewer: 'Review',
-        }
-        const tab = map[a.artifact_type]
-        if (tab && a.data) {
-          next[tab] = { status: 'saved', data: a.data, updatedAt: new Date().toISOString(), error: null }
+      for (const a of initialArtifacts) {
+        const tab = Object.keys(MODULE_KEY_MAP).find(
+          (tab) => MODULE_KEY_MAP[tab as ModuleName] === a.artifact_type
+        ) as ModuleName | undefined
+        if (tab) {
+          // Backend stores content as content_json (string); parse it for the UI
+          const parsedData = a.content_json ? JSON.parse(a.content_json) : null
+          next[tab] = { status: 'saved', data: parsedData, updatedAt: new Date().toISOString(), error: null }
         }
       }
       return next
     })
   }, [initialArtifacts])
 
-  const clearAutosaveStatus = useCallback(() => setAutosaveStatus('idle'), [])
+  // ── Timer helpers ─────────────────────────────────────────────────────────
+
+  const startTimer = useCallback((module: ModuleName) => {
+    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+    generationStartRef.current = Date.now()
+    setElapsedSeconds(0)
+    setGeneratingModal(module)
+
+    elapsedTimerRef.current = setInterval(() => {
+      if (generationStartRef.current) {
+        setElapsedSeconds(Math.floor((Date.now() - generationStartRef.current) / 1000))
+      }
+    }, 1000)
+  }, [])
+
+  const stopTimer = useCallback(() => {
+    if (elapsedTimerRef.current) {
+      clearInterval(elapsedTimerRef.current)
+      elapsedTimerRef.current = null
+    }
+    generationStartRef.current = null
+    setGeneratingModal(null)
+  }, [])
+
+  // ── Module state helpers ───────────────────────────────────────────────────
 
   const updateModuleState = useCallback((module: ModuleName, partial: Partial<ModuleState>) => {
     setModuleStates((s) => ({ ...s, [module]: { ...s[module], ...partial } }))
   }, [])
 
-  const generateModule = useCallback(async (module: ModuleName) => {
-    // Check prereqs first
-    const prereqs: Record<ModuleName, ModuleName[]> = {
-      'Epic Map': [], 'User Stories': ['Epic Map'], 'QA Scenarios': ['User Stories'],
-      'Analytics': ['User Stories'], 'Risks': ['Epic Map', 'User Stories'],
-      'Review': ['Epic Map', 'User Stories', 'QA Scenarios', 'Analytics', 'Risks'],
+  // ── SSE parsing + fetch ───────────────────────────────────────────────────
+
+  /**
+   * Parse raw SSE text and return parsed data + error.
+   * Handles multi-line SSE blocks: event: module_data / data: {"user_stories": [...]}
+   * and single JSON fallback.
+   */
+  const parseSSE = useCallback((text: string, moduleKey: string): { parsedData: unknown; error: string | null } => {
+    const blocks = text.split('\n\n')
+    for (const block of blocks) {
+      const lines = block.split('\n')
+      let eventType = ''
+      let dataLine = ''
+      for (const line of lines) {
+        if (line.startsWith('event:')) eventType = line.slice(6).trim()
+        if (line.startsWith('data:')) dataLine = line.slice(5).trim()
+      }
+      if (!dataLine) continue
+      try {
+        const parsed = JSON.parse(dataLine)
+        if (eventType === 'prerequisite_missing') {
+          return { parsedData: null, error: `Generate ${parsed} first` }
+        }
+        if (eventType === 'error') {
+          return { parsedData: null, error: String(parsed) }
+        }
+        // module_data events carry {"user_stories": [...]} — extract by key match
+        if (eventType === 'module_data' && parsed && typeof parsed === 'object') {
+          for (const key of Object.keys(parsed)) {
+            if (moduleKey === key || moduleKey.includes(key) || key.includes(moduleKey)) {
+              return { parsedData: parsed[key], error: null }
+            }
+          }
+        }
+        // Direct key lookup
+        if (parsed && typeof parsed === 'object' && moduleKey in parsed) {
+          return { parsedData: parsed[moduleKey], error: null }
+        }
+      } catch {
+        // skip non-JSON
+      }
     }
-    for (const p of prereqs[module]) {
+
+    // Fallback: single JSON object
+    try {
+      const parsed = JSON.parse(text.trim())
+      if (parsed && typeof parsed === 'object' && moduleKey in parsed) {
+        return { parsedData: parsed[moduleKey], error: null }
+      }
+    } catch {
+      // not JSON
+    }
+
+    return { parsedData: null, error: null }
+  }, [])
+
+  const saveArtifact = useCallback(async (moduleKey: string, data: unknown) => {
+    await artifactsApi.save(workbenchId, {
+      artifact_type: moduleKey,
+      content_json: JSON.stringify(data),
+    })
+  }, [workbenchId])
+
+  const doGenerate = useCallback(async (module: ModuleName, regenerate: boolean) => {
+    const moduleKey = MODULE_KEY_MAP[module]
+
+    let res: Response
+    try {
+      res = await fetch('/api/generate/modular', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${useAuthStore.getState().token}`,
+        },
+        body: JSON.stringify({ workbench_id: workbenchId, module: moduleKey, regenerate }),
+      })
+    } catch (err) {
+      updateModuleState(module, { status: 'error', error: (err as Error)?.message || 'Network error' })
+      stopTimer()
+      return
+    }
+
+    if (!res.ok) {
+      const errText = await res.text()
+      updateModuleState(module, { status: 'error', error: `Generation failed: ${res.status} — ${errText}` })
+      stopTimer()
+      return
+    }
+
+    const text = await res.text()
+    const { parsedData, error } = parseSSE(text, moduleKey)
+
+    if (error) {
+      updateModuleState(module, { status: 'error', error })
+      stopTimer()
+      return
+    }
+
+    if (parsedData !== null) {
+      await saveArtifact(moduleKey, parsedData)
+      updateModuleState(module, { status: 'saved', data: parsedData, updatedAt: new Date().toISOString(), error: null })
+    } else {
+      updateModuleState(module, { status: 'error', error: 'No data returned. The AI response may have been empty.' })
+    }
+    stopTimer()
+  }, [workbenchId, parseSSE, saveArtifact, updateModuleState, stopTimer])
+
+  // ── Generation ─────────────────────────────────────────────────────────────
+
+  const generateModule = useCallback(async (module: ModuleName) => {
+    for (const p of PREREQUISITES[module]) {
       const pState = moduleStates[p]
       if (!pState || pState.status !== 'saved') {
         updateModuleState(module, { status: 'missing_prereq', error: `Generate ${p} first` })
@@ -115,86 +278,42 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
     }
 
     updateModuleState(module, { status: 'generating', error: null })
-    setGeneratingModal(module)
-    generationStartRef.current[module] = Date.now()
-    setElapsedSeconds(0)
-
-    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
-    elapsedTimerRef.current = setInterval(() => {
-      const start = generationStartRef.current[module]
-      if (start) setElapsedSeconds(Math.floor((Date.now() - start) / 1000))
-    }, 1000)
-
-    try {
-      const { parsedData, error } = await generate(workbenchId, module, false)
-      if (error) {
-        updateModuleState(module, { status: 'error', error })
-      } else if (parsedData !== null) {
-        await saveArtifact(workbenchId, module.replace(' ', '_').toLowerCase().replace('qa ', 'qa_').replace('user ', 'user_'), parsedData)
-        updateModuleState(module, { status: 'saved', data: parsedData, updatedAt: new Date().toISOString(), error: null })
-      }
-    } catch (err: unknown) {
-      updateModuleState(module, { status: 'error', error: (err as Error)?.message || 'Generation failed' })
-    }
-
-    if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
-    setGeneratingModal(null)
-  }, [workbenchId, moduleStates, generate, saveArtifact, updateModuleState])
+    startTimer(module)
+    await doGenerate(module, false)
+  }, [moduleStates, startTimer, doGenerate, updateModuleState])
 
   const regenerateModule = useCallback(async (module: ModuleName) => {
     updateModuleState(module, { status: 'generating', error: null })
-    setGeneratingModal(module)
-    generationStartRef.current[module] = Date.now()
-    setElapsedSeconds(0)
+    startTimer(module)
+    await doGenerate(module, true)
+  }, [startTimer, doGenerate, updateModuleState])
 
-    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
-    elapsedTimerRef.current = setInterval(() => {
-      const start = generationStartRef.current[module]
-      if (start) setElapsedSeconds(Math.floor((Date.now() - start) / 1000))
-    }, 1000)
-
-    try {
-      const { parsedData, error } = await generate(workbenchId, module, true)
-      if (error) {
-        updateModuleState(module, { status: 'error', error })
-      } else if (parsedData !== null) {
-        const keyMap: Record<ModuleName, string> = {
-          'Epic Map': 'epic_map', 'User Stories': 'user_stories', 'QA Scenarios': 'qa_scenarios',
-          'Analytics': 'analytics', 'Risks': 'risks', 'Review': 'reviewer',
-        }
-        await saveArtifact(workbenchId, keyMap[module], parsedData)
-        updateModuleState(module, { status: 'saved', data: parsedData, updatedAt: new Date().toISOString(), error: null })
-      }
-    } catch (err: unknown) {
-      updateModuleState(module, { status: 'error', error: (err as Error)?.message || 'Regeneration failed' })
-    }
-
-    if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null }
-    setGeneratingModal(null)
-  }, [workbenchId, generate, saveArtifact, updateModuleState])
+  // ── Epic ───────────────────────────────────────────────────────────────────
 
   const addEpic = useCallback((newEpic: Epic) => {
     setModuleStates((s) => {
       const current = (s['Epic Map'].data as Epic[]) || []
       const next = [...current, newEpic]
-      saveArtifact(workbenchId, 'epic_map', next)
-      return { ...s, 'Epic Map': { ...s['Epic Map'], data: next, status: 'saved' } }
+      saveArtifact('epic_map', next)
+      return { ...s, 'Epic Map': { ...s['Epic Map'], data: next } }
     })
-  }, [workbenchId, saveArtifact])
+  }, [saveArtifact])
 
   const deleteEpic = useCallback((epicId: string) => {
     setModuleStates((s) => {
       const current = (s['Epic Map'].data as Epic[]) || []
-      const next = current.filter(e => e.id !== epicId)
-      saveArtifact(workbenchId, 'epic_map', next)
-      return { ...s, 'Epic Map': { ...s['Epic Map'], data: next, status: 'saved' } }
+      const next = current.filter((e) => e.id !== epicId)
+      saveArtifact('epic_map', next)
+      return { ...s, 'Epic Map': { ...s['Epic Map'], data: next } }
     })
-  }, [workbenchId, saveArtifact])
+  }, [saveArtifact])
+
+  // ── User Story ─────────────────────────────────────────────────────────────
 
   const addStory = useCallback((epicId: string) => {
     const newStory: UserStory = {
       id: `story-${Date.now()}`,
-      epicId: epicId,
+      epicId: epicId || 'General',
       user: 'User',
       goal: 'Goal',
       benefit: 'Benefit',
@@ -203,19 +322,137 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
     setModuleStates((s) => {
       const current = (s['User Stories'].data as UserStory[]) || []
       const next = [...current, newStory]
-      saveArtifact(workbenchId, 'user_stories', next)
-      return { ...s, 'User Stories': { ...s['User Stories'], data: next, status: 'saved' } }
+      saveArtifact('user_stories', next)
+      return { ...s, 'User Stories': { ...s['User Stories'], data: next } }
     })
-  }, [workbenchId, saveArtifact])
+  }, [saveArtifact])
 
   const deleteStory = useCallback((storyId: string) => {
     setModuleStates((s) => {
       const current = (s['User Stories'].data as UserStory[]) || []
-      const next = current.filter(st => st.id !== storyId)
-      saveArtifact(workbenchId, 'user_stories', next)
-      return { ...s, 'User Stories': { ...s['User Stories'], data: next, status: 'saved' } }
+      const next = current.filter((st) => st.id !== storyId)
+      saveArtifact('user_stories', next)
+      return { ...s, 'User Stories': { ...s['User Stories'], data: next } }
     })
-  }, [workbenchId, saveArtifact])
+  }, [saveArtifact])
+
+  // ── QA Scenarios ────────────────────────────────────────────────────────────
+
+  const addScenario = useCallback((type: 'positive' | 'negative' | 'edge' | 'validation') => {
+    const newScenario = {
+      id: `qa-${Date.now()}`,
+      title: 'New Scenario',
+      type,
+      preconditions: 'Pre-conditions...',
+      steps: 'Steps...',
+      expectedResult: 'Expected result...',
+    }
+    setModuleStates((s) => {
+      const current = (s['QA Scenarios'].data as unknown[]) || []
+      const next = [...current, newScenario]
+      saveArtifact('qa_scenarios', next)
+      return { ...s, 'QA Scenarios': { ...s['QA Scenarios'], data: next } }
+    })
+  }, [saveArtifact])
+
+  const deleteScenario = useCallback((id: string) => {
+    setModuleStates((s) => {
+      const current = (s['QA Scenarios'].data as unknown[]) || []
+      const next = current.filter((item: any) => item.id !== id)
+      saveArtifact('qa_scenarios', next)
+      return { ...s, 'QA Scenarios': { ...s['QA Scenarios'], data: next } }
+    })
+  }, [saveArtifact])
+
+  const editScenario = useCallback((id: string, field: string, value: string) => {
+    setModuleStates((s) => {
+      const current = (s['QA Scenarios'].data as any[]) || []
+      const next = current.map((item: any) =>
+        item.id === id ? { ...item, [field]: value } : item
+      )
+      saveArtifact('qa_scenarios', next)
+      return { ...s, 'QA Scenarios': { ...s['QA Scenarios'], data: next } }
+    })
+  }, [saveArtifact])
+
+  // ── Analytics ───────────────────────────────────────────────────────────────
+
+  const addEvent = useCallback(() => {
+    const newEvent = {
+      id: `event-${Date.now()}`,
+      eventName: 'new_event',
+      trigger: 'Trigger...',
+      purpose: 'Purpose...',
+      funnelStage: 'awareness',
+    }
+    setModuleStates((s) => {
+      const current = (s['Analytics'].data as unknown[]) || []
+      const next = [...current, newEvent]
+      saveArtifact('analytics', next)
+      return { ...s, 'Analytics': { ...s['Analytics'], data: next } }
+    })
+  }, [saveArtifact])
+
+  const deleteEvent = useCallback((id: string) => {
+    setModuleStates((s) => {
+      const current = (s['Analytics'].data as unknown[]) || []
+      const next = current.filter((item: any) => item.id !== id)
+      saveArtifact('analytics', next)
+      return { ...s, 'Analytics': { ...s['Analytics'], data: next } }
+    })
+  }, [saveArtifact])
+
+  const editEvent = useCallback((id: string, field: string, value: string) => {
+    setModuleStates((s) => {
+      const current = (s['Analytics'].data as any[]) || []
+      const next = current.map((item: any) =>
+        item.id === id ? { ...item, [field]: value } : item
+      )
+      saveArtifact('analytics', next)
+      return { ...s, 'Analytics': { ...s['Analytics'], data: next } }
+    })
+  }, [saveArtifact])
+
+  // ── Risks ───────────────────────────────────────────────────────────────────
+
+  const addRisk = useCallback(() => {
+    const newRisk = {
+      id: `risk-${Date.now()}`,
+      text: 'New risk...',
+      type: 'technical',
+      severity: 'medium' as const,
+      checked: false,
+      suggestedAction: 'Suggested action...',
+    }
+    setModuleStates((s) => {
+      const current = (s['Risks'].data as unknown[]) || []
+      const next = [...current, newRisk]
+      saveArtifact('risks', next)
+      return { ...s, 'Risks': { ...s['Risks'], data: next } }
+    })
+  }, [saveArtifact])
+
+  const deleteRisk = useCallback((id: string) => {
+    setModuleStates((s) => {
+      const current = (s['Risks'].data as unknown[]) || []
+      const next = current.filter((item: any) => item.id !== id)
+      saveArtifact('risks', next)
+      return { ...s, 'Risks': { ...s['Risks'], data: next } }
+    })
+  }, [saveArtifact])
+
+  const editRisk = useCallback((id: string, field: string, value: string) => {
+    setModuleStates((s) => {
+      const current = (s['Risks'].data as any[]) || []
+      const next = current.map((item: any) =>
+        item.id === id ? { ...item, [field]: value } : item
+      )
+      saveArtifact('risks', next)
+      return { ...s, 'Risks': { ...s['Risks'], data: next } }
+    })
+  }, [saveArtifact])
+
+  // ── Autosave ────────────────────────────────────────────────────────────────
 
   const triggerAutosave = useCallback((inputs: Record<string, unknown>) => {
     setAutosaveStatus('saving')
@@ -232,11 +469,32 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
     }, 2500)
   }, [workbenchId])
 
+  const clearAutosaveStatus = useCallback(() => setAutosaveStatus('idle'), [])
+
   return {
-    moduleStates, activeTab, autosaveStatus, generatingModal, elapsedSeconds,
-    setActiveTab, updateModuleState,
-    generateModule, regenerateModule,
-    addEpic, deleteEpic, addStory, deleteStory,
-    triggerAutosave, clearAutosaveStatus,
+    moduleStates,
+    activeTab,
+    autosaveStatus,
+    generatingModal,
+    elapsedSeconds,
+    setActiveTab,
+    updateModuleState,
+    generateModule,
+    regenerateModule,
+    addEpic,
+    deleteEpic,
+    addStory,
+    deleteStory,
+    addScenario,
+    deleteScenario,
+    editScenario,
+    addEvent,
+    deleteEvent,
+    editEvent,
+    addRisk,
+    deleteRisk,
+    editRisk,
+    triggerAutosave,
+    clearAutosaveStatus,
   }
 }

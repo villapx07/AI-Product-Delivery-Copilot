@@ -1,5 +1,5 @@
 /**
- * Auth store — Zustand with localStorage persistence
+ * Auth store — Zustand with localStorage persistence.
  * Holds user session state (non-server state).
  * Auth API calls go through React Query; this store mirrors auth state for UI.
  */
@@ -27,6 +27,12 @@ interface AuthState {
   setUser: (user: User) => void
 }
 
+const PARTIALIZE = (state: AuthState) => ({
+  user: state.user,
+  token: state.token,
+  isAuthenticated: state.isAuthenticated,
+})
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
@@ -34,40 +40,27 @@ export const useAuthStore = create<AuthState>()(
       token: null,
       isAuthenticated: false,
 
-      login: (user, token) =>
-        set({
-          user,
-          token,
-          isAuthenticated: true,
-        }),
+      login(user, token) {
+        set({ user, token, isAuthenticated: true })
+      },
 
-      logout: () =>
-        set({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-        }),
+      logout() {
+        set({ user: null, token: null, isAuthenticated: false })
+      },
 
-      setUser: (user) =>
-        set({
-          user,
-          isAuthenticated: true,
-        }),
+      setUser(user) {
+        set({ user, isAuthenticated: true })
+      },
     }),
     {
-      name: 'forge-auth', // localStorage key
-      partialize: (state) => ({
-        user: state.user,
-        token: state.token,
-        isAuthenticated: state.isAuthenticated,
-      }),
+      name: 'forge-auth',
+      partialize: PARTIALIZE,
     }
   )
 )
 
 // Helpers
 export function getToken(): string | null {
-  // For use in API layer (runs outside React) — read from localStorage directly
   if (typeof window !== 'undefined') {
     try {
       const raw = localStorage.getItem('forge-auth')
@@ -75,7 +68,9 @@ export function getToken(): string | null {
         const parsed = JSON.parse(raw)
         return parsed.state?.token ?? null
       }
-    } catch {}
+    } catch {
+      // ignore
+    }
   }
   return useAuthStore.getState().token
 }
@@ -84,7 +79,7 @@ export function getAuthHeaders(): Record<string, string> {
   const token = getToken()
   if (!token) return {}
   return {
-    'Authorization': `Bearer ${token}`,
+    Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   }
 }
