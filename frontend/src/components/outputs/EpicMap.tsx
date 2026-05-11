@@ -19,11 +19,12 @@ interface EpicMapProps {
   data: Epic[]
   onEdit: (id: string, field: keyof Epic, value: string) => void
   onAddEpic?: (epic: Epic) => void
+  onDeleteEpic?: (id: string) => void
   onRegenerate: () => void
   isRegenerating: boolean
 }
 
-export function EpicMap({ data, onEdit, onAddEpic, isRegenerating, onRegenerate }: EpicMapProps) {
+export function EpicMap({ data, onEdit, onAddEpic, onDeleteEpic, isRegenerating, onRegenerate }: EpicMapProps) {
   const [copied, setCopied] = React.useState(false)
 
   const priorityColors = {
@@ -86,6 +87,7 @@ export function EpicMap({ data, onEdit, onAddEpic, isRegenerating, onRegenerate 
               <th className="text-left py-2 px-3 font-medium text-text-secondary">Teams</th>
               <th className="text-left py-2 px-3 font-medium text-text-secondary">Dependencies</th>
               <th className="text-left py-2 px-3 font-medium text-text-secondary">Priority</th>
+              <th className="text-left py-2 px-3 font-medium text-text-secondary w-10"></th>
             </tr>
           </thead>
           <tbody>
@@ -134,6 +136,18 @@ export function EpicMap({ data, onEdit, onAddEpic, isRegenerating, onRegenerate 
                   <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', priorityColors[epic.priority])}>
                     {epic.priority}
                   </span>
+                </td>
+                <td className="py-2.5 px-3 align-top">
+                  <button
+                    onClick={() => onDeleteEpic?.(epic.id)}
+                    className="p-1 rounded hover:bg-border text-text-secondary/50 hover:text-danger transition-colors"
+                    title="Delete epic"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                  </button>
                 </td>
               </tr>
             ))}

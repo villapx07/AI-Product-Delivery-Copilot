@@ -246,21 +246,32 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
         const eventBlocks = text.split('\n\n')
         for (const block of eventBlocks) {
           const lines = block.split('\n')
+          let eventType = ''
           let dataLine = ''
           for (const line of lines) {
+            if (line.startsWith('event:')) {
+              eventType = line.slice(6).trim()
+            }
             if (line.startsWith('data:')) {
               dataLine = line.slice(5).trim()
-              break
             }
           }
           if (!dataLine) continue
           try {
             const parsed = JSON.parse(dataLine)
+            if (eventType === 'prerequisite_missing') {
+              throw new Error(`Generate ${parsed} first`)
+            }
+            if (eventType === 'error') {
+              throw new Error(parsed)
+            }
             if (parsed && typeof parsed === 'object' && moduleKey in parsed) {
               parsedData = parsed[moduleKey]
               break
             }
-          } catch {}
+          } catch (e) {
+            if (e instanceof Error && (e.message.startsWith('Generate') || e.message.includes('generation failed'))) throw e
+          }
         }
 
         if (!parsedData) {
@@ -334,21 +345,32 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
         const eventBlocks = text.split('\n\n')
         for (const block of eventBlocks) {
           const lines = block.split('\n')
+          let eventType = ''
           let dataLine = ''
           for (const line of lines) {
+            if (line.startsWith('event:')) {
+              eventType = line.slice(6).trim()
+            }
             if (line.startsWith('data:')) {
               dataLine = line.slice(5).trim()
-              break
             }
           }
           if (!dataLine) continue
           try {
             const parsed = JSON.parse(dataLine)
+            if (eventType === 'prerequisite_missing') {
+              throw new Error(`Generate ${parsed} first`)
+            }
+            if (eventType === 'error') {
+              throw new Error(parsed)
+            }
             if (parsed && typeof parsed === 'object' && moduleKey in parsed) {
               parsedData = parsed[moduleKey]
               break
             }
-          } catch {}
+          } catch (e) {
+            if (e instanceof Error && (e.message.startsWith('Generate') || e.message.includes('generation failed'))) throw e
+          }
         }
 
         if (!parsedData) {
@@ -395,17 +417,30 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
         },
       }
     })
-    // Also save to backend
-    saveArtifact(workbench.id, 'epic_map', [
-      ...((moduleStates['Epic Map'].data as Epic[]) || []),
-      newEpic,
-    ])
+    const newData = [...((moduleStates['Epic Map'].data as Epic[]) || []), newEpic]
+    saveArtifact(workbench.id, 'epic_map', newData)
   }, [workbench.id, moduleStates, saveArtifact])
 
-  const handleAddStory = useCallback(() => {
+  const handleDeleteEpic = useCallback((epicId: string) => {
+    setModuleStates((s) => {
+      const current = (s['Epic Map'].data as Epic[]) || []
+      return {
+        ...s,
+        'Epic Map': {
+          ...s['Epic Map'],
+          data: current.filter(e => e.id !== epicId),
+          status: 'saved',
+        },
+      }
+    })
+    const newData = ((moduleStates['Epic Map'].data as Epic[]) || []).filter(e => e.id !== epicId)
+    saveArtifact(workbench.id, 'epic_map', newData)
+  }, [workbench.id, moduleStates, saveArtifact])
+
+  const handleAddStory = useCallback((epicId: string) => {
     const newStory: UserStory = {
       id: `story-${Date.now()}`,
-      epicId: '',
+      epicId: epicId,
       user: 'User',
       goal: 'Goal',
       benefit: 'Benefit',
@@ -422,10 +457,24 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
         },
       }
     })
-    saveArtifact(workbench.id, 'user_stories', [
-      ...((moduleStates['User Stories'].data as UserStory[]) || []),
-      newStory,
-    ])
+    const newData = [...((moduleStates['User Stories'].data as UserStory[]) || []), newStory]
+    saveArtifact(workbench.id, 'user_stories', newData)
+  }, [workbench.id, moduleStates, saveArtifact])
+
+  const handleDeleteStory = useCallback((storyId: string) => {
+    setModuleStates((s) => {
+      const current = (s['User Stories'].data as UserStory[]) || []
+      return {
+        ...s,
+        'User Stories': {
+          ...s['User Stories'],
+          data: current.filter(st => st.id !== storyId),
+          status: 'saved',
+        },
+      }
+    })
+    const newData = ((moduleStates['User Stories'].data as UserStory[]) || []).filter(st => st.id !== storyId)
+    saveArtifact(workbench.id, 'user_stories', newData)
   }, [workbench.id, moduleStates, saveArtifact])
 
   const tabStatusColor = (tab: ModuleName): string => {
@@ -523,7 +572,9 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
               onRegenerate={regenerateModule}
               elapsedSeconds={elapsedSeconds}
               onAddEpic={handleAddEpic}
+              onDeleteEpic={handleDeleteEpic}
               onAddStory={handleAddStory}
+              onDeleteStory={handleDeleteStory}
             />
           </div>
         </div>
@@ -588,7 +639,9 @@ function ModuleContent({
   onRegenerate,
   elapsedSeconds,
   onAddEpic,
+  onDeleteEpic,
   onAddStory,
+  onDeleteStory,
 }: {
   tab: ModuleName
   moduleStates: Record<ModuleName, ModuleState>
@@ -596,7 +649,9 @@ function ModuleContent({
   onRegenerate: (tab: ModuleName) => void
   elapsedSeconds: number
   onAddEpic?: (epic: Epic) => void
-  onAddStory?: () => void
+  onDeleteEpic?: (id: string) => void
+  onAddStory?: (epicId: string) => void
+  onDeleteStory?: (storyId: string) => void
 }) {
   const s = moduleStates[tab]
 
@@ -688,6 +743,7 @@ function ModuleContent({
           data={(s.data as Epic[]) || []}
           onEdit={() => {}}
           onAddEpic={onAddEpic}
+          onDeleteEpic={onDeleteEpic}
           onRegenerate={() => onRegenerate(tab)}
           isRegenerating={false}
         />
@@ -697,6 +753,7 @@ function ModuleContent({
           data={(s.data as UserStory[]) || []}
           onEdit={() => {}}
           onAddStory={onAddStory}
+          onDeleteStory={onDeleteStory}
           onAddCriterion={() => {}}
           onRemoveCriterion={() => {}}
           onRegenerate={() => onRegenerate(tab)}

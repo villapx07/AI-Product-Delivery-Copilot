@@ -218,6 +218,9 @@ async def generate_module_sse(
             stories_json = json.dumps(upstream["user_stories"])
             system, user_prompt = build_qa_prompt(discovery, stories_json)
             result = await generate_json(system, user_prompt)
+            if result is None:
+                yield {"event": "error", "data": "QA scenarios generation failed: no response from LLM"}
+                return
             parsed = result if isinstance(result, list) else result.get("qa_scenarios", result.get("scenarios", []))
             yield {"event": "module_data", "data": json.dumps({module: parsed})}
             yield {"event": "module_complete", "data": module}

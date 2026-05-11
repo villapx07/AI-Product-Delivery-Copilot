@@ -22,14 +22,15 @@ export interface UserStory {
 interface UserStoriesProps {
   data: UserStory[]
   onEdit: (storyId: string, field: string, value: string) => void
-  onAddStory?: () => void
+  onAddStory?: (epicId: string) => void
+  onDeleteStory?: (storyId: string) => void
   onAddCriterion: (storyId: string) => void
   onRemoveCriterion: (storyId: string, criterionId: string) => void
   onRegenerate: () => void
   isRegenerating: boolean
 }
 
-export function UserStories({ data, onEdit, onAddStory, onAddCriterion, onRemoveCriterion, isRegenerating, onRegenerate }: UserStoriesProps) {
+export function UserStories({ data, onEdit, onAddStory, onDeleteStory, onAddCriterion, onRemoveCriterion, isRegenerating, onRegenerate }: UserStoriesProps) {
   const [copied, setCopied] = React.useState(false)
 
   const handleCopy = () => {
@@ -54,7 +55,7 @@ export function UserStories({ data, onEdit, onAddStory, onAddCriterion, onRemove
       <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
         <p className="text-sm text-text-secondary">No user stories generated yet.</p>
         {onAddStory && (
-          <button onClick={onAddStory} className="text-xs text-accent hover:text-accent/80 font-medium">
+          <button onClick={() => onAddStory('')} className="text-xs text-accent hover:text-accent/80 font-medium">
             + Add User Story manually
           </button>
         )}
@@ -67,12 +68,6 @@ export function UserStories({ data, onEdit, onAddStory, onAddCriterion, onRemove
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text-primary">User Stories</h2>
         <div className="flex items-center gap-1">
-          {onAddStory && (
-            <Button variant="ghost" size="sm" onClick={onAddStory}>
-              <Plus className="w-3.5 h-3.5" />
-              Add Story
-            </Button>
-          )}
           <Button variant="ghost" size="sm" onClick={handleCopy}>
             <Copy className="w-3.5 h-3.5" />
             {copied ? 'Copied!' : 'Copy'}
@@ -94,11 +89,38 @@ export function UserStories({ data, onEdit, onAddStory, onAddCriterion, onRemove
         }, {})
       ).map(([epicId, stories]) => (
         <div key={epicId} className="flex flex-col gap-3">
-          <h3 className="text-xs font-medium text-accent uppercase tracking-wide">{epicId || 'General'}</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-medium text-accent uppercase tracking-wide">{epicId || 'General'}</h3>
+            {onAddStory && (
+              <button
+                onClick={() => onAddStory(epicId === 'General' ? '' : epicId)}
+                className="flex items-center gap-1 text-xs text-accent hover:text-accent/80"
+              >
+                <Plus className="w-3 h-3" />
+                Add story
+              </button>
+            )}
+          </div>
           {stories.map((story, idx) => (
             <div key={story.id} className="bg-background border border-border rounded-lg p-4">
               <div className="flex items-start justify-between mb-3">
-                <span className="text-xs font-medium text-text-secondary">#{idx + 1}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-text-secondary">#{idx + 1}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {onDeleteStory && (
+                    <button
+                      onClick={() => onDeleteStory(story.id)}
+                      className="p-1 rounded hover:bg-border text-text-secondary/50 hover:text-danger transition-colors"
+                      title="Delete story"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* USER STORY block */}
