@@ -9,7 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from models import GenerateRequest
+from db import init_db, session_scope
+from auth.jwt import hash_password
+from models import User, UserRole, UserStatus
 from config_manager import load_config, save_config, apply_config, DEFAULT_CONFIG
 from session_store import create_session, get_session, list_sessions, update_session_artifacts
 from export_utils import export_markdown, export_json, export_jira_csv
@@ -23,8 +25,36 @@ from prompt_orchestrator import (
 )
 from llm_client import generate_json, stream_generate, generate_with_image
 
+# ── Routers ──────────────────────────────────────────────────────────────────
+from routers.auth import router as auth_router
+from routers.users import router as users_router
+from routers.workbenches import router as workbenches_router
+from routers.artifacts import router as artifacts_router
 
-# ── Config persistence ────────────────────────────────────────────
+
+# ── Super Admin seed ──────────────────────────────────────────────────────────
+
+def seed_super_admin():
+    """Create default SUPER_ADMIN if no users exist. Run once on startup."""
+    with session_scope() as db:
+        count = db.query(User).count()
+        if count == 0:
+            admin = User(
+                name="Admin",
+                email="admin@forge.local",
+                password_hash=hash_password("forge123"),
+                role=UserRole.SUPER_ADMIN,
+                status=UserStatus.ACTIVE,
+            )
+            db.add(admin)
+            db.commit()
+            print("  ✓ Seeded default SUPER_ADMIN: admin@forge.local / forge123")
+        else:
+            print(f"  ✓ {count} user(s) found — skipping seed")
+
+
+# ── Config persistence ────────────────────────────────────────────────────────
+
 CONFIG_FILE = Path(__file__).parent / "config.json"
 
 
@@ -37,16 +67,22 @@ class ConfigUpdate(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup — load saved config and apply to env
-    print("🚀 AI Product Delivery Copilot API starting...")
+    print("🚀 Forge Delivery API starting...")
+    init_db()                          # Create tables (idempotent)
+    seed_super_admin()                 # Seed default admin
     cfg = load_config()
     apply_config(cfg)
-    print(f"  Provider: {cfg.get('provider', 'openai')} | Model: {cfg.get('model', 'gpt-4o')}")
+    print(f"  ✓ Provider: {cfg.get('provider','openai')} | Model: {cfg.get('model','gpt-4o')}")
     yield
     print("👋 Shutting down...")
 
 
-app = FastAPI(title="AI Product Delivery Copilot", version="1.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Forge Delivery",
+    version="1.0.1",
+    description="AI-native product delivery platform",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,20 +92,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Register routers ──────────────────────────────────────────────────────────
+app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(workbenches_router)
+app.include_router(artifacts_router)
 
-# ── Config endpoint ──────────────────────────────────────────────
+
+# ── Existing endpoints (kept for backward compat during transition) ─────────────
+
 @app.get("/api/config")
 async def get_config():
-    """Return current LLM config (api_key masked)."""
     cfg = load_config()
     if cfg.get("api_key"):
-        cfg["api_key"] = cfg["api_key"][:6] + "***"   # mask for display
+        cfg["api_key"] = cfg["api_key"][:6] + "***"
     return cfg
 
 
 @app.patch("/api/config")
 async def update_config(update: ConfigUpdate):
-    """Update LLM config and persist to disk."""
     cfg = load_config()
     if update.provider is not None:
         cfg["provider"] = update.provider
@@ -79,14 +120,11 @@ async def update_config(update: ConfigUpdate):
         cfg["base_url"] = update.base_url
     if update.model is not None:
         cfg["model"] = update.model
-
     saved = save_config(cfg)
     apply_config(saved)
-    print(f"⚙️  Config updated — provider={saved['provider']} model={saved['model']}")
     return {"status": "ok", "config": saved}
 
 
-# ── Session endpoints ─────────────────────────────────────────────
 class GenerateRequestWithSession(BaseModel):
     session_id: Optional[str] = None
     feature_title: str
@@ -102,14 +140,12 @@ class GenerateRequestWithSession(BaseModel):
 
 @app.get("/api/sessions")
 async def get_sessions():
-    """List all sessions, newest first."""
     sessions = list_sessions(limit=30)
     return {"sessions": sessions}
 
 
 @app.get("/api/sessions/{session_id}")
 async def get_session_by_id(session_id: str):
-    """Get a single session with all artifacts."""
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -118,7 +154,6 @@ async def get_session_by_id(session_id: str):
 
 @app.post("/api/sessions")
 async def start_session(req: GenerateRequestWithSession):
-    """Create a new session (pre-generate)."""
     session = create_session(
         feature_title=req.feature_title,
         business_objective=req.business_objective,
@@ -134,13 +169,8 @@ async def start_session(req: GenerateRequestWithSession):
     return {"session_id": session["id"], **session}
 
 
-# ── Export endpoints ─────────────────────────────────────────────
 @app.get("/api/export/{session_id}/{format}")
 async def export_session(session_id: str, format: str):
-    """
-    Export session artifacts in the given format.
-    format: 'markdown' | 'json' | 'jira'
-    """
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -165,17 +195,15 @@ async def export_session(session_id: str, format: str):
         raise HTTPException(status_code=400, detail="Unknown format. Use: markdown, json, jira")
 
 
-# ── SSE generation pipeline ───────────────────────────────────────
-async def generate_sse(req: GenerateRequest) -> AsyncGenerator[dict, None]:
-    """Sequential module generation with image analysis support."""
+# ── SSE generation pipeline ───────────────────────────────────────────────────
 
+async def generate_sse(req) -> AsyncGenerator[dict, None]:
     all_artifacts = {}
 
-    # Step 1: Epic Map
     yield {"event": "module_start", "data": "epic_map"}
     try:
-        system, user = build_epic_prompt(req)
-        result = await generate_json(system, user)
+        system, user_prompt = build_epic_prompt(req)
+        result = await generate_json(system, user_prompt)
         if result:
             epics = result if isinstance(result, list) else result.get("epics", result.get("epic_map", []))
             all_artifacts["epic_map"] = epics
@@ -183,12 +211,11 @@ async def generate_sse(req: GenerateRequest) -> AsyncGenerator[dict, None]:
     except Exception as e:
         yield {"event": "error", "data": f"Epic Map generation failed: {str(e)}"}
 
-    # Step 2: User Stories
     yield {"event": "module_start", "data": "user_stories"}
     try:
         epic_json = json.dumps(all_artifacts.get("epic_map", []))
-        system, user = build_user_stories_prompt(req, epic_json)
-        result = await generate_json(system, user)
+        system, user_prompt = build_user_stories_prompt(req, epic_json)
+        result = await generate_json(system, user_prompt)
         if result:
             stories = result if isinstance(result, list) else result.get("user_stories", result.get("stories", []))
             all_artifacts["user_stories"] = stories
@@ -196,12 +223,11 @@ async def generate_sse(req: GenerateRequest) -> AsyncGenerator[dict, None]:
     except Exception as e:
         yield {"event": "error", "data": f"User Stories generation failed: {str(e)}"}
 
-    # Step 3: QA Scenarios
     yield {"event": "module_start", "data": "qa_scenarios"}
     try:
         stories_json = json.dumps(all_artifacts.get("user_stories", []))
-        system, user = build_qa_prompt(req, stories_json)
-        result = await generate_json(system, user)
+        system, user_prompt = build_qa_prompt(req, stories_json)
+        result = await generate_json(system, user_prompt)
         if result:
             qa = result if isinstance(result, list) else result.get("qa_scenarios", result.get("scenarios", []))
             all_artifacts["qa_scenarios"] = qa
@@ -209,12 +235,11 @@ async def generate_sse(req: GenerateRequest) -> AsyncGenerator[dict, None]:
     except Exception as e:
         yield {"event": "error", "data": f"QA Scenarios generation failed: {str(e)}"}
 
-    # Step 4: Analytics Events
     yield {"event": "module_start", "data": "analytics_events"}
     try:
         stories_json = json.dumps(all_artifacts.get("user_stories", []))
-        system, user = build_analytics_prompt(req, stories_json)
-        result = await generate_json(system, user)
+        system, user_prompt = build_analytics_prompt(req, stories_json)
+        result = await generate_json(system, user_prompt)
         if result:
             analytics = result if isinstance(result, list) else result.get("analytics_events", result.get("events", []))
             all_artifacts["analytics_events"] = analytics
@@ -222,12 +247,11 @@ async def generate_sse(req: GenerateRequest) -> AsyncGenerator[dict, None]:
     except Exception as e:
         yield {"event": "error", "data": f"Analytics generation failed: {str(e)}"}
 
-    # Step 5: Risks
     yield {"event": "module_start", "data": "risks"}
     try:
         epic_json = json.dumps(all_artifacts.get("epic_map", []))
-        system, user = build_risks_prompt(req, epic_json)
-        result = await generate_json(system, user)
+        system, user_prompt = build_risks_prompt(req, epic_json)
+        result = await generate_json(system, user_prompt)
         if result:
             risks = result if isinstance(result, list) else result.get("risks", result.get("risks_list", []))
             all_artifacts["risks"] = risks
@@ -235,11 +259,10 @@ async def generate_sse(req: GenerateRequest) -> AsyncGenerator[dict, None]:
     except Exception as e:
         yield {"event": "error", "data": f"Risks generation failed: {str(e)}"}
 
-    # Step 6: AI Reviewer
     yield {"event": "module_start", "data": "reviewer"}
     try:
-        system, user = build_reviewer_prompt(req, all_artifacts)
-        result = await generate_json(system, user)
+        system, user_prompt = build_reviewer_prompt(req, all_artifacts)
+        result = await generate_json(system, user_prompt)
         if result:
             reviews = result if isinstance(result, list) else result.get("reviewer_items", result.get("reviews", []))
             all_artifacts["reviewer_items"] = reviews
@@ -247,36 +270,10 @@ async def generate_sse(req: GenerateRequest) -> AsyncGenerator[dict, None]:
     except Exception as e:
         yield {"event": "error", "data": f"Reviewer generation failed: {str(e)}"}
 
-    # Image analysis (optional step if files were uploaded)
-    if req.uploaded_files and req.file_names:
-        yield {"event": "module_start", "data": "image_analysis"}
-        try:
-            system = load_prompt("image_analysis") or (
-                "You are a senior UX/product analyst. Given a screenshot or design image, describe "
-                "the user flow, key UI elements, and potential product implications."
-            )
-            for i, (img_b64, img_name) in enumerate(zip(req.uploaded_files, req.file_names)):
-                result = await generate_with_image(system, f"Analyze this image ({img_name}):", img_b64)
-                if result:
-                    all_artifacts[f"image_analysis_{i}"] = result
-            yield {"event": "module_complete", "data": json.dumps({"image_analysis": all_artifacts.get("image_analysis_0", {})})}
-        except Exception as e:
-            yield {"event": "error", "data": f"Image analysis failed: {str(e)}"}
-
-    # Complete
     yield {"event": "complete", "data": json.dumps(all_artifacts)}
 
 
-def load_prompt(name: str) -> str:
-    try:
-        return (Path(__file__).parent / "prompts" / f"{name}.txt").read_text()
-    except Exception:
-        return ""
-
-
-async def event_generator(req: GenerateRequest, on_complete=None) -> AsyncGenerator[str, None]:
-    """Convert generation events to SSE format. Calls on_complete with all artifacts at end."""
-    all_artifacts = {}
+async def event_generator(req, on_complete=None) -> AsyncGenerator[str, None]:
     async for event in generate_sse(req):
         yield f"event: {event['event']}\ndata: {event['data']}\n\n"
         if event['event'] == 'complete' and on_complete:
@@ -287,12 +284,8 @@ async def event_generator(req: GenerateRequest, on_complete=None) -> AsyncGenera
 
 
 @app.post("/api/generate")
-async def generate(request: GenerateRequest):
-    """
-    Main generation endpoint. Streams SSE events as each module completes.
-    Optionally include session_id in body to persist artifacts on completion.
-    """
-    session_id = getattr(request, 'session_id', None) or (request.uploaded_files and len(request.uploaded_files) > 0 and request.file_names[0])
+async def generate(request):
+    session_id = getattr(request, 'session_id', None)
 
     def _save_artifacts(artifacts: dict) -> None:
         if session_id:
@@ -314,8 +307,8 @@ async def health():
     cfg = load_config()
     return {
         "status": "ok",
-        "service": "ai-product-delivery-copilot",
-        "version": "1.1.0",
+        "service": "forge-delivery",
+        "version": "1.0.1",
         "provider": cfg.get("provider", "openai"),
         "model": cfg.get("model", "gpt-4o"),
     }
