@@ -243,8 +243,7 @@ async def generate_module_sse(
 
         elif module == "reviewer":
             # Reviewer gets full context: all artifacts + discovery inputs
-            all_context = {**discovery, "artifacts": upstream}
-            system, user_prompt = build_reviewer_prompt(all_context)
+            system, user_prompt = build_reviewer_prompt(discovery, upstream)
             result = await generate_json(system, user_prompt)
             parsed = result if isinstance(result, list) else result.get("reviewer_items", result.get("reviews", []))
             yield {"event": "module_data", "data": json.dumps({module: parsed})}

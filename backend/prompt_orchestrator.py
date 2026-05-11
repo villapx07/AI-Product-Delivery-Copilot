@@ -1,7 +1,7 @@
 import os
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -15,25 +15,57 @@ def load_prompt(module: str) -> str:
 
 
 def build_input_summary(req) -> str:
-    """Build a text summary of the inputs for prompting."""
-    lines = [f"Feature Title: {req.feature_title}"]
-    lines.append(f"Business Objective: {req.business_objective}")
-    if req.problem_statement:
-        lines.append(f"Problem Statement: {req.problem_statement}")
-    if req.success_metrics:
-        lines.append(f"Success Metrics: {req.success_metrics}")
-    if req.constraints:
-        lines.append(f"Constraints: {req.constraints}")
-    if req.assumptions:
-        lines.append(f"Assumptions: {req.assumptions}")
-    if req.impacted_teams:
-        lines.append(f"Impacted Teams: {', '.join(req.impacted_teams)}")
-    if req.uploaded_files and req.file_names:
-        lines.append(f"Uploaded Files: {', '.join(req.file_names)}")
+    """Build a text summary of the inputs for prompting.
+
+    Handles both legacy request objects (with .feature_title attribute access)
+    and the new dict-based discovery inputs from the modular pipeline.
+    """
+    feature_title = getattr(req, 'feature_title', req.get('feature_title', '')) if isinstance(req, dict) else req.feature_title
+    business_objective = getattr(req, 'business_objective', req.get('business_objective', '')) if isinstance(req, dict) else req.business_objective
+
+    lines = [f"Feature Title: {feature_title}"]
+    lines.append(f"Business Objective: {business_objective}")
+
+    # Handle dict-style access
+    def get_field(r, key):
+        if isinstance(r, dict):
+            return r.get(key, '')
+        return getattr(r, key, '')
+
+    problem = get_field(req, 'problem_statement')
+    if problem:
+        lines.append(f"Problem Statement: {problem}")
+
+    metrics = get_field(req, 'success_metrics')
+    if metrics:
+        lines.append(f"Success Metrics: {metrics}")
+
+    constraints = get_field(req, 'constraints')
+    if constraints:
+        lines.append(f"Constraints: {constraints}")
+
+    assumptions = get_field(req, 'assumptions')
+    if assumptions:
+        lines.append(f"Assumptions: {assumptions}")
+
+    impacted = get_field(req, 'impacted_teams')
+    if impacted:
+        teams = impacted if isinstance(impacted, list) else impacted.split(',')
+        lines.append(f"Impacted Teams: {', '.join(teams)}")
+
+    # Legacy: uploaded files
+    uploaded = get_field(req, 'uploaded_files')
+    file_names = get_field(req, 'file_names')
+    if uploaded and file_names:
+        fnames = file_names if isinstance(file_names, list) else file_names.split(',')
+        lines.append(f"Uploaded Files: {', '.join(fnames)}")
+
     return "\n".join(lines)
 
 
-def build_epic_prompt(req) -> str:
+# ── Epic Map ──────────────────────────────────────────────────────────────────
+
+def build_epic_prompt(req) -> Tuple[str, str]:
     system = load_prompt("epic_map")
     context = build_input_summary(req)
     user = f"""Generate an Epic Map for the following feature:
@@ -44,7 +76,9 @@ Return JSON array of epics."""
     return system, user
 
 
-def build_user_stories_prompt(req, epic_map_json: str) -> str:
+# ── User Stories ─────────────────────────────────────────────────────────────
+
+def build_user_stories_prompt(req, epic_map_json: str) -> Tuple[str, str]:
     system = load_prompt("user_stories")
     context = build_input_summary(req)
     user = f"""Generate user stories for the following feature and epic map:
@@ -58,7 +92,9 @@ Return JSON array of user stories."""
     return system, user
 
 
-def build_qa_prompt(req, user_stories_json: str) -> str:
+# ── QA Scenarios ──────────────────────────────────────────────────────────────
+
+def build_qa_prompt(req, user_stories_json: str) -> Tuple[str, str]:
     system = load_prompt("qa_scenarios")
     context = build_input_summary(req)
     user = f"""Generate QA test scenarios for the following feature and user stories:
@@ -72,7 +108,9 @@ Return JSON array of test scenarios."""
     return system, user
 
 
-def build_analytics_prompt(req, user_stories_json: str) -> str:
+# ── Analytics ────────────────────────────────────────────────────────────────
+
+def build_analytics_prompt(req, user_stories_json: str) -> Tuple[str, str]:
     system = load_prompt("analytics")
     context = build_input_summary(req)
     user = f"""Generate analytics events for the following feature:
@@ -86,7 +124,9 @@ Return JSON array of analytics events."""
     return system, user
 
 
-def build_risks_prompt(req, epic_map_json: str) -> str:
+# ── Risks ─────────────────────────────────────────────────────────────────────
+
+def build_risks_prompt(req, epic_map_json: str = "[]") -> Tuple[str, str]:
     system = load_prompt("risks")
     context = build_input_summary(req)
     user = f"""Identify risks and dependencies for the following feature and epic map:
@@ -100,27 +140,54 @@ Return JSON array of risk items."""
     return system, user
 
 
-def build_reviewer_prompt(req, all_artifacts: dict) -> str:
+# ── Reviewer ──────────────────────────────────────────────────────────────────
+
+def build_reviewer_prompt(req, all_artifacts: dict = None) -> Tuple[str, str]:
+    """Build the reviewer prompt.
+
+    req: discovery inputs dict (from modular pipeline) or legacy request object
+    all_artifacts: dict of {artifact_type: data} for context injection
+    """
     system = load_prompt("reviewer")
     context = build_input_summary(req)
-    user = f"""Review the following generated artifacts and identify gaps, risks, and areas for improvement:
+
+    artifacts = all_artifacts or {}
+
+    epic_map_json = json.dumps(artifacts.get('epic_map', []), indent=2)
+    user_stories_json = json.dumps(artifacts.get('user_stories', []), indent=2)
+    qa_json = json.dumps(artifacts.get('qa_scenarios', []), indent=2)
+    analytics_json = json.dumps(artifacts.get('analytics', []), indent=2)
+    risks_json = json.dumps(artifacts.get('risks', []), indent=2)
+
+    user = f"""You are an AI delivery governance reviewer. Analyze the generated artifacts and identify:
+- Inconsistencies and gaps
+- Missing logic and undefined flows
+- Compliance and risk gaps
+- Conflicting assumptions
+- Missing edge cases
 
 {context}
 
 Epic Map:
-{json.dumps(all_artifacts.get('epic_map', []), indent=2)}
+{epic_map_json}
 
 User Stories:
-{json.dumps(all_artifacts.get('user_stories', []), indent=2)}
+{user_stories_json}
 
 QA Scenarios:
-{json.dumps(all_artifacts.get('qa_scenarios', []), indent=2)}
+{qa_json}
 
 Analytics Events:
-{json.dumps(all_artifacts.get('analytics_events', []), indent=2)}
+{analytics_json}
 
 Risks:
-{json.dumps(all_artifacts.get('risks', []), indent=2)}
+{risks_json}
 
-Return JSON array of review items."""
+Return JSON array of review findings. Each finding should have:
+- severity: "critical" | "major" | "minor"
+- category: "inconsistency" | "gap" | "risk" | "compliance" | "assumption"
+- title: short description
+- description: detailed explanation
+- recommendation: suggested fix or next step
+"""
     return system, user

@@ -16,6 +16,7 @@ interface GeneratorState {
   qa_scenarios: QAScenarioData | null
   analytics: AnalyticsData | null
   risks: RiskData | null
+  reviewer: ReviewerData | null
 }
 
 export interface EpicData { id: string; title: string; description: string; teams: string[]; dependencies: string; priority: 'P0' | 'P1' | 'P2' }
@@ -23,6 +24,7 @@ export interface UserStoryData { id: string; epic_id: string; title: string; as_
 export interface QAScenarioData { id: string; story_id: string; scenario: string; steps: string[]; expected: string; priority: 'P0' | 'P1' | 'P2' }
 export interface AnalyticsData { id: string; name: string; metric: string; baseline: string; target: string }
 export interface RiskData { id: string; description: string; impact: 'HIGH' | 'MEDIUM' | 'LOW'; mitigation: string }
+export interface ReviewerData { id: string; severity: string; category: string; title: string; description: string; recommendation: string }
 
 interface GeneratorContextValue {
   state: GeneratorState
@@ -33,6 +35,7 @@ interface GeneratorContextValue {
   updateQAScenarios: (data: QAScenarioData[]) => void
   updateAnalytics: (data: AnalyticsData[]) => void
   updateRisks: (data: RiskData[]) => void
+  updateReviewer: (data: ReviewerData[]) => void
   setGenerating: (module: string | null) => void
   saveArtifact: (workbenchId: string, artifactType: string, data: unknown) => Promise<void>
 }
@@ -49,7 +52,7 @@ export function GeneratorProvider({
   initialArtifacts?: Record<string, unknown>[]
 }) {
   const [state, setState] = useState<GeneratorState>({
-    epic_map: null, user_stories: null, qa_scenarios: null, analytics: null, risks: null,
+    epic_map: null, user_stories: null, qa_scenarios: null, analytics: null, risks: null, reviewer: null,
   })
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatingModule, setGeneratingModule] = useState<string | null>(null)
@@ -58,7 +61,7 @@ export function GeneratorProvider({
   const restoredRef = useRef(false)
   if (!restoredRef.current && initialArtifacts.length > 0) {
     restoredRef.current = true
-    const hydrated: GeneratorState = { epic_map: null, user_stories: null, qa_scenarios: null, analytics: null, risks: null }
+    const hydrated: GeneratorState = { epic_map: null, user_stories: null, qa_scenarios: null, analytics: null, risks: null, reviewer: null }
     for (const artifact of initialArtifacts) {
       const a = artifact as any
       if (a.artifact_type === 'epic_map' && a.data) hydrated.epic_map = a.data as EpicData
@@ -66,6 +69,7 @@ export function GeneratorProvider({
       if (a.artifact_type === 'qa_scenarios' && a.data) hydrated.qa_scenarios = a.data as QAScenarioData
       if (a.artifact_type === 'analytics' && a.data) hydrated.analytics = a.data as AnalyticsData
       if (a.artifact_type === 'risks' && a.data) hydrated.risks = a.data as RiskData
+      if (a.artifact_type === 'reviewer' && a.data) hydrated.reviewer = a.data as ReviewerData
     }
     setState(hydrated)
   }
@@ -90,6 +94,10 @@ export function GeneratorProvider({
     setState((s) => ({ ...s, risks: data as unknown as RiskData }))
   }, [])
 
+  const updateReviewer = useCallback((data: ReviewerData[]) => {
+    setState((s) => ({ ...s, reviewer: data as unknown as ReviewerData }))
+  }, [])
+
   const setGenerating = useCallback((module: string | null) => {
     setIsGenerating(module !== null)
     setGeneratingModule(module)
@@ -105,7 +113,7 @@ export function GeneratorProvider({
   return (
     <GeneratorContext.Provider value={{
       state, isGenerating, generatingModule,
-      updateEpicMap, updateUserStories, updateQAScenarios, updateAnalytics, updateRisks,
+      updateEpicMap, updateUserStories, updateQAScenarios, updateAnalytics, updateRisks, updateReviewer,
       setGenerating, saveArtifact,
     }}>
       {children}
