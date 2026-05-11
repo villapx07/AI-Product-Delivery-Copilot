@@ -13,8 +13,10 @@ from db import init_db, session_scope
 from auth.jwt import hash_password
 from models import User, UserRole, UserStatus
 from config_manager import load_config, save_config, apply_config, DEFAULT_CONFIG
-from session_store import create_session, get_session, list_sessions, update_session_artifacts
-from export_utils import export_markdown, export_json, export_jira_csv
+from routers.auth import router as auth_router
+from routers.users import router as users_router
+from routers.workbenches import router as workbenches_router
+from routers.artifacts import router as artifacts_router
 from prompt_orchestrator import (
     build_epic_prompt,
     build_user_stories_prompt,
@@ -23,14 +25,7 @@ from prompt_orchestrator import (
     build_risks_prompt,
     build_reviewer_prompt,
 )
-from llm_client import generate_json, stream_generate, generate_with_image
-
-# ── Routers ──────────────────────────────────────────────────────────────────
-from routers.auth import router as auth_router
-from routers.users import router as users_router
-from routers.workbenches import router as workbenches_router
-from routers.artifacts import router as artifacts_router
-
+from llm_client import generate_json
 
 # ── Super Admin seed ──────────────────────────────────────────────────────────
 
@@ -68,8 +63,8 @@ class ConfigUpdate(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 Forge Delivery API starting...")
-    init_db()                          # Create tables (idempotent)
-    seed_super_admin()                 # Seed default admin
+    init_db()
+    seed_super_admin()
     cfg = load_config()
     apply_config(cfg)
     print(f"  ✓ Provider: {cfg.get('provider','openai')} | Model: {cfg.get('model','gpt-4o')}")
@@ -92,14 +87,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Register routers ──────────────────────────────────────────────────────────
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(workbenches_router)
 app.include_router(artifacts_router)
 
 
-# ── Existing endpoints (kept for backward compat during transition) ─────────────
+# ── Legacy config endpoints ────────────────────────────────────────────────────
 
 @app.get("/api/config")
 async def get_config():
@@ -125,6 +119,174 @@ async def update_config(update: ConfigUpdate):
     return {"status": "ok", "config": saved}
 
 
+# ── Modularity: per-module generation ─────────────────────────────────────────
+
+# Module definitions: dependencies and what context each module needs
+MODULE_DEPENDENCIES = {
+    "epic_map": [],                      # No upstream deps
+    "user_stories": ["epic_map"],        # Needs epics
+    "qa_scenarios": ["user_stories"],   # Needs stories
+    "analytics": ["epic_map", "user_stories"],  # Needs both
+    "risks": ["epic_map", "user_stories", "qa_scenarios", "analytics"],  # Needs all
+    "reviewer": ["epic_map", "user_stories", "qa_scenarios", "analytics", "risks"],  # Needs everything
+}
+
+MODULE_DISPLAY_NAMES = {
+    "epic_map": "Epic Map",
+    "user_stories": "User Stories",
+    "qa_scenarios": "QA Scenarios",
+    "analytics": "Analytics Events",
+    "risks": "Risks",
+    "reviewer": "AI Review",
+}
+
+
+class ModularGenerateRequest(BaseModel):
+    workbench_id: str
+    module: str          # epic_map | user_stories | qa_scenarios | analytics | risks | reviewer
+    regenerate: bool = False
+
+
+def _get_upstream_artifacts(workbench_id: str) -> dict:
+    """Fetch all saved artifacts for a workbench to use as generation context."""
+    from routers.artifacts import get_artifacts_for_workbench
+    artifacts = get_artifacts_for_workbench(workbench_id)
+    result = {}
+    for a in artifacts:
+        try:
+            result[a.artifact_type] = json.loads(a.content_json)
+        except Exception:
+            pass
+    return result
+
+
+async def generate_module_sse(
+    workbench_id: str,
+    module: str,
+    is_regenerate: bool = False,
+) -> AsyncGenerator[dict, None]:
+    """
+    Isolated generation pipeline for a single module.
+    Loads upstream artifacts from DB, builds prompts, streams SSE.
+    Does NOT modify other modules' artifacts.
+    """
+    if module not in MODULE_DEPENDENCIES:
+        yield {"event": "error", "data": f"Unknown module: {module}"}
+        return
+
+    # Load upstream artifacts
+    upstream = _get_upstream_artifacts(workbench_id)
+
+    # Build inputs object from workbench (Discovery inputs for prompt building)
+    # We reconstruct a lightweight "req" dict from workbench + artifacts
+    from routers.workbenches import get_workbench
+    workbench = get_workbench(workbench_id)
+
+    discovery = {
+        "feature_title": workbench.title if workbench else "",
+        "business_objective": workbench.business_objective if workbench else "",
+        "problem_statement": workbench.problem_statement if workbench else "",
+        "success_metrics": workbench.success_metrics if workbench else "",
+        "constraints": workbench.constraints if workbench else "",
+        "assumptions": workbench.assumptions if workbench else "",
+        "impacted_teams": workbench.impacted_teams if workbench else [],
+    }
+
+    yield {"event": "module_start", "data": module}
+
+    try:
+        result = None
+        if module == "epic_map":
+            system, user_prompt = build_epic_prompt(discovery)
+            result = await generate_json(system, user_prompt)
+            parsed = result if isinstance(result, list) else result.get("epics", result.get("epic_map", []))
+            yield {"event": "module_data", "data": json.dumps({module: parsed})}
+            yield {"event": "module_complete", "data": module}
+
+        elif module == "user_stories":
+            epic_json = json.dumps(upstream.get("epic_map", []))
+            system, user_prompt = build_user_stories_prompt(discovery, epic_json)
+            result = await generate_json(system, user_prompt)
+            parsed = result if isinstance(result, list) else result.get("user_stories", result.get("stories", []))
+            yield {"event": "module_data", "data": json.dumps({module: parsed})}
+            yield {"event": "module_complete", "data": module}
+
+        elif module == "qa_scenarios":
+            if not upstream.get("user_stories"):
+                yield {"event": "prerequisite_missing", "data": "user_stories"}
+                return
+            stories_json = json.dumps(upstream["user_stories"])
+            system, user_prompt = build_qa_prompt(discovery, stories_json)
+            result = await generate_json(system, user_prompt)
+            parsed = result if isinstance(result, list) else result.get("qa_scenarios", result.get("scenarios", []))
+            yield {"event": "module_data", "data": json.dumps({module: parsed})}
+            yield {"event": "module_complete", "data": module}
+
+        elif module == "analytics":
+            if not upstream.get("user_stories"):
+                yield {"event": "prerequisite_missing", "data": "user_stories"}
+                return
+            stories_json = json.dumps(upstream["user_stories"])
+            system, user_prompt = build_analytics_prompt(discovery, stories_json)
+            result = await generate_json(system, user_prompt)
+            parsed = result if isinstance(result, list) else result.get("analytics_events", result.get("events", []))
+            yield {"event": "module_data", "data": json.dumps({module: parsed})}
+            yield {"event": "module_complete", "data": module}
+
+        elif module == "risks":
+            epic_json = json.dumps(upstream.get("epic_map", []))
+            system, user_prompt = build_risks_prompt(discovery, epic_json)
+            result = await generate_json(system, user_prompt)
+            parsed = result if isinstance(result, list) else result.get("risks", result.get("risks_list", []))
+            yield {"event": "module_data", "data": json.dumps({module: parsed})}
+            yield {"event": "module_complete", "data": module}
+
+        elif module == "reviewer":
+            # Reviewer gets full context: all artifacts + discovery inputs
+            all_context = {**discovery, "artifacts": upstream}
+            system, user_prompt = build_reviewer_prompt(all_context)
+            result = await generate_json(system, user_prompt)
+            parsed = result if isinstance(result, list) else result.get("reviewer_items", result.get("reviews", []))
+            yield {"event": "module_data", "data": json.dumps({module: parsed})}
+            yield {"event": "module_complete", "data": module}
+
+    except Exception as e:
+        yield {"event": "error", "data": f"{MODULE_DISPLAY_NAMES.get(module, module)} generation failed: {str(e)}"}
+
+    yield {"event": "generation_done", "data": module}
+
+
+async def modular_event_generator(req: ModularGenerateRequest) -> AsyncGenerator[str, None]:
+    async for event in generate_module_sse(req.workbench_id, req.module, req.regenerate):
+        yield f"event: {event['event']}\ndata: {event['data']}\n\n"
+
+
+@app.post("/api/generate/modular")
+async def generate_modular(req: ModularGenerateRequest):
+    """Per-module generation endpoint. Accepts workbench_id + module name.
+    Loads upstream artifacts from DB and generates only the requested module.
+
+    SSE events:
+      - module_start       → generation began
+      - prerequisite_missing → upstream artifacts not available
+      - module_data        → JSON of generated {module: data}
+      - module_complete    → module generation succeeded
+      - error              → something went wrong
+      - generation_done    → pipeline finished
+    """
+    return StreamingResponse(
+        modular_event_generator(req),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Backward-compatible legacy generate endpoint ──────────────────────────────
+
 class GenerateRequestWithSession(BaseModel):
     session_id: Optional[str] = None
     feature_title: str
@@ -136,6 +298,12 @@ class GenerateRequestWithSession(BaseModel):
     impacted_teams: list[str] = []
     uploaded_files: list[str] = []
     file_names: list[str] = []
+    # New: optional workbench_id to also save artifacts there
+    workbench_id: Optional[str] = None
+
+
+from session_store import create_session, get_session, list_sessions, update_session_artifacts
+from export_utils import export_markdown, export_json, export_jira_csv
 
 
 @app.get("/api/sessions")
@@ -195,9 +363,10 @@ async def export_session(session_id: str, format: str):
         raise HTTPException(status_code=400, detail="Unknown format. Use: markdown, json, jira")
 
 
-# ── SSE generation pipeline ───────────────────────────────────────────────────
+# ── Legacy SSE generation (full pipeline — kept for compat) ────────────────────
 
 async def generate_sse(req) -> AsyncGenerator[dict, None]:
+    """DEPRECATED — kept for backward compatibility during transition."""
     all_artifacts = {}
 
     yield {"event": "module_start", "data": "epic_map"}
@@ -255,7 +424,7 @@ async def generate_sse(req) -> AsyncGenerator[dict, None]:
         if result:
             risks = result if isinstance(result, list) else result.get("risks", result.get("risks_list", []))
             all_artifacts["risks"] = risks
-            yield {"event": "module_complete", "data": json.dumps({"risks": risks})}
+            yield {"event": "module_complete", "data": json.dumps({"risifacts": risks})}
     except Exception as e:
         yield {"event": "error", "data": f"Risks generation failed: {str(e)}"}
 
@@ -285,6 +454,7 @@ async def event_generator(req, on_complete=None) -> AsyncGenerator[str, None]:
 
 @app.post("/api/generate")
 async def generate(request):
+    """Legacy endpoint — kept for backward compatibility."""
     session_id = getattr(request, 'session_id', None)
 
     def _save_artifacts(artifacts: dict) -> None:

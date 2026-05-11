@@ -92,6 +92,99 @@ export const workbenchesApi = {
     request(`/api/workbenches/${workbenchId}`, { method: 'DELETE' }),
 }
 
+// ── Generation (modular, per-module) ──────────────────────────────────────────
+
+/**
+ * Modular SSE generator for a single workbench module.
+ * Returns a ReadableStream<Uint8Array> that emits SSE events.
+ */
+export function generateModuleStream(workbenchId: string, module: string, regenerate = false): ReadableStream<Uint8Array> {
+  const headers = getAuthHeaders()
+  const url = `/api/generate/modular`
+  let consumed = false
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body: JSON.stringify({ workbench_id: workbenchId, module, regenerate }),
+        })
+
+        if (!response.ok || !response.body) {
+          controller.close()
+          return
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (line.startsWith('data:')) {
+              const data = line.slice(5).trim()
+              if (data && !consumed) {
+                controller.enqueue(new TextEncoder().encode(`data: ${data}\n`))
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // client disconnected
+      } finally {
+        controller.close()
+      }
+    },
+  })
+
+  return stream
+}
+
+/** Parse SSE string into module name → data object. Returns null until module_complete. */
+export function parseModuleSSE(sseText: string): { module: string; data: unknown } | null {
+  const lines = sseText.split('\n')
+  let eventType = ''
+  let eventData = ''
+
+  for (const line of lines) {
+    if (line.startsWith('event:')) eventType = line.slice(6).trim()
+    if (line.startsWith('data:')) eventData = line.slice(5).trim()
+    if (line === '') {
+      // End of event
+      if (eventType === 'module_data' && eventData) {
+        try {
+          return { module: eventType, data: JSON.parse(eventData) }
+        } catch {}
+      }
+      eventType = ''
+      eventData = ''
+    }
+  }
+  return null
+}
+
+export function parseModuleSSEFromText(text: string): { module: string; data: Record<string, unknown> } | null {
+  try {
+    const parsed = JSON.parse(text)
+    const key = Object.keys(parsed)[0]
+    return key ? { module: key, data: parsed[key] as Record<string, unknown> } : null
+  } catch {
+    return null
+  }
+}
+
 // ── Artifacts ─────────────────────────────────────────────────────────────────
 
 export const artifactsApi = {

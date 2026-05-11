@@ -175,3 +175,12 @@ async def delete_artifact(
     db.delete(artifact)
     db.commit()
     return {"message": "Artifact deleted"}
+
+
+# ── Sync helpers for generation pipeline (no auth, used by main.py) ────────────
+
+def get_artifacts_for_workbench(workbench_id: str) -> list:
+    """Return all Artifact rows for a workbench (sync, no auth — used by generation pipeline)."""
+    from db import session_scope
+    with session_scope() as db:
+        return db.query(Artifact).filter(Artifact.workbench_id == workbench_id).all()

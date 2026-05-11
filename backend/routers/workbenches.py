@@ -251,3 +251,12 @@ def _build_workbench_response(workbench: Workbench, db: Session, requesting_user
         **workbench.to_dict(include_owner=include_owner),
         artifact_count=artifact_count,
     )
+
+
+# ── Sync helper for generation pipeline (no auth, used by main.py) ────────────
+
+def get_workbench(workbench_id: str):
+    """Return a Workbench row by id (sync, no auth — used by generation pipeline)."""
+    from db import session_scope
+    with session_scope() as db:
+        return db.query(Workbench).filter(Workbench.id == workbench_id).first()
