@@ -7,11 +7,20 @@ import { useAuthStore } from '@/store/authStore'
 import { workbenchesApi, artifactsApi, generateModuleStream, parseModuleSSEFromText } from '@/lib/api'
 import { GeneratorProvider, useGenerator } from '@/context/GeneratorContext'
 import { DiscoveryForm, type DiscoveryInputs } from '@/components/inputs/DiscoveryForm'
+import { FileUpload } from '@/components/inputs/FileUpload'
 import { EpicMap, type Epic } from '@/components/outputs/EpicMap'
 import { UserStories, type UserStory } from '@/components/outputs/UserStories'
 import { QAScenarios } from '@/components/outputs/QAScenarios'
 import { Risks } from '@/components/outputs/Risks'
 import { AnalyticsEvents } from '@/components/outputs/AnalyticsEvents'
+
+interface UploadedFile {
+  id: string
+  name: string
+  size: number
+  preview?: string
+  data: string
+}
 
 // ── Module config ──────────────────────────────────────────────────────────────
 
@@ -130,6 +139,9 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
     assumptions: workbench.assumptions || '',
     impacted_teams: workbench.impacted_teams || [],
   })
+
+  // Files state (context uploads)
+  const [files, setFiles] = useState<UploadedFile[]>([])
 
   // Restore artifacts into moduleStates on mount
   useEffect(() => {
@@ -510,7 +522,7 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
 
       {/* Main content */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Left panel: Discovery form */}
+        {/* Left panel: Discovery form + file uploads */}
         <div style={leftPanelStyle}>
           <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: '16px' }}>
             Discovery
@@ -527,6 +539,9 @@ function WorkbenchShell({ workbench }: { workbench: any }) {
             canGenerate={!!inputs.feature_title.trim() && !!inputs.business_objective.trim()}
             generatingModule={null}
           />
+          <div style={{ borderTop: '1px solid var(--color-border)', marginTop: '24px', paddingTop: '20px' }}>
+            <FileUpload files={files} onFilesChange={setFiles} />
+          </div>
         </div>
 
         {/* Right panel: outputs */}

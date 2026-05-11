@@ -221,7 +221,21 @@ async def generate_module_sse(
             if result is None:
                 yield {"event": "error", "data": "QA scenarios generation failed: no response from LLM"}
                 return
-            parsed = result if isinstance(result, list) else result.get("qa_scenarios", result.get("scenarios", []))
+            if not isinstance(result, list):
+                # Guard against LLM returning a non-list (e.g. object or string)
+                # Try to extract a list from result using known keys
+                parsed = None
+                for key in ("qa_scenarios", "scenarios", "tests", "items"):
+                    if key in result:
+                        val = result[key]
+                        if isinstance(val, list):
+                            parsed = val
+                            break
+                if parsed is None:
+                    yield {"event": "error", "data": "QA scenarios generation failed: LLM returned invalid format (expected a list)"}
+                    return
+            else:
+                parsed = result
             yield {"event": "module_data", "data": json.dumps({module: parsed})}
             yield {"event": "module_complete", "data": module}
 

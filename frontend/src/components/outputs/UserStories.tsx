@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { Button } from '@/components/ui/Button'
-import { RefreshCw, Copy, Plus, Trash2 } from 'lucide-react'
+import { RefreshCw, Copy, Plus, Trash2, Download } from 'lucide-react'
 
 interface AcceptanceCriterion {
   id: string
@@ -71,6 +71,19 @@ export function UserStories({ data, onEdit, onAddStory, onDeleteStory, onAddCrit
           <Button variant="ghost" size="sm" onClick={handleCopy}>
             <Copy className="w-3.5 h-3.5" />
             {copied ? 'Copied!' : 'Copy'}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => {
+            const json = JSON.stringify(data, null, 2)
+            const blob = new Blob([json], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `user-stories-${Date.now()}.json`
+            a.click()
+            URL.revokeObjectURL(url)
+          }}>
+            <Download className="w-3.5 h-3.5" />
+            Export
           </Button>
           <Button variant="ghost" size="sm" loading={isRegenerating} onClick={onRegenerate}>
             <RefreshCw className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin' : ''}`} />
