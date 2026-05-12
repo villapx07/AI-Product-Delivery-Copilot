@@ -224,7 +224,7 @@ function ModuleContent({
   // Risks
   onAddRisk: () => void
   onDeleteRisk: (id: string) => void
-  onEditRisk: (id: string, field: string, value: string) => void
+  onEditRisk: (id: string, field: string, value: string | boolean) => void
 }) {
   const s = moduleStates[tab]
 

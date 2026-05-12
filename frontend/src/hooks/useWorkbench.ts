@@ -15,7 +15,8 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { artifactsApi } from '@/lib/api'
 import type { ModuleName, ModuleState } from '@/hooks/useGeneration'
-import type { Epic, UserStory } from '@/components/outputs/EpicMap'
+import type { Epic } from '@/components/outputs/EpicMap'
+import type { UserStory } from '@/components/outputs/UserStories'
 
 // ── Module config ────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ const DEFAULT_STATES = (): Record<ModuleName, ModuleState> => ({
 interface UseWorkbenchOptions {
   workbenchId: string
   workbench: Record<string, unknown>
-  initialArtifacts?: Array<{ artifact_type: string; data: unknown }>
+  initialArtifacts?: Array<{ artifact_type: string; content_json: string }>
 }
 
 export interface UseWorkbenchReturn {
@@ -89,7 +90,7 @@ export interface UseWorkbenchReturn {
   // Risks
   addRisk: () => void
   deleteRisk: (id: string) => void
-  editRisk: (id: string, field: string, value: string) => void
+  editRisk: (id: string, field: string, value: string | boolean) => void
 
   // Autosave
   triggerAutosave: (inputs: Record<string, unknown>) => void
@@ -131,10 +132,14 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
 
   // ── Timer helpers ─────────────────────────────────────────────────────────
 
+  // Use a ref so the interval always reads the current module, not a stale closure.
+  const generatingRef = useRef<ModuleName | null>(null)
+
   const startTimer = useCallback((module: ModuleName) => {
     if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
     generationStartRef.current = Date.now()
     setElapsedSeconds(0)
+    generatingRef.current = module
     setGeneratingModal(module)
 
     elapsedTimerRef.current = setInterval(() => {
@@ -150,6 +155,7 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
       elapsedTimerRef.current = null
     }
     generationStartRef.current = null
+    generatingRef.current = null
     setGeneratingModal(null)
   }, [])
 
@@ -261,7 +267,9 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
       await saveArtifact(moduleKey, parsedData)
       updateModuleState(module, { status: 'saved', data: parsedData, updatedAt: new Date().toISOString(), error: null })
     } else {
-      updateModuleState(module, { status: 'error', error: 'No data returned. The AI response may have been empty.' })
+      // Parse succeeded but no data found — still save as empty to avoid re-generating
+      await saveArtifact(moduleKey, [])
+      updateModuleState(module, { status: 'saved', data: [], updatedAt: new Date().toISOString(), error: null })
     }
     stopTimer()
   }, [workbenchId, parseSSE, saveArtifact, updateModuleState, stopTimer])
@@ -280,7 +288,7 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
     updateModuleState(module, { status: 'generating', error: null })
     startTimer(module)
     await doGenerate(module, false)
-  }, [moduleStates, startTimer, doGenerate, updateModuleState])
+  }, [moduleStates, updateModuleState, startTimer, doGenerate])
 
   const regenerateModule = useCallback(async (module: ModuleName) => {
     updateModuleState(module, { status: 'generating', error: null })
@@ -441,9 +449,9 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
     })
   }, [saveArtifact])
 
-  const editRisk = useCallback((id: string, field: string, value: string) => {
+  const editRisk = useCallback((id: string, field: string, value: string | boolean) => {
     setModuleStates((s) => {
-      const current = (s['Risks'].data as any[]) || []
+      const current = (s['Risks'].data as unknown[]) || []
       const next = current.map((item: any) =>
         item.id === id ? { ...item, [field]: value } : item
       )

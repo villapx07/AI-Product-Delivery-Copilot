@@ -113,7 +113,9 @@ def _get_upstream_artifacts(workbench_id: str) -> dict:
     result = {}
     for a in artifacts:
         try:
-            result[a.artifact_type] = json.loads(a.content_json)
+            # a is now a plain dict with 'artifact_type' (str) and 'content_json' (str)
+            key = a["artifact_type"]
+            result[key] = json.loads(a["content_json"])
         except Exception:
             pass
     return result

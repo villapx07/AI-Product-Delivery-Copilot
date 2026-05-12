@@ -180,7 +180,18 @@ async def delete_artifact(
 # ── Sync helpers for generation pipeline (no auth, used by main.py) ────────────
 
 def get_artifacts_for_workbench(workbench_id: str) -> list:
-    """Return all Artifact rows for a workbench (sync, no auth — used by generation pipeline)."""
+    """Return all Artifact rows for a workbench (sync, no auth — used by generation pipeline).
+
+    Returns list of plain dicts (not ORM objects) so they remain valid after the
+    session is closed. Keys: artifact_type (str value), content_json (str).
+    """
     from db import session_scope
     with session_scope() as db:
-        return db.query(Artifact).filter(Artifact.workbench_id == workbench_id).all()
+        artifacts = db.query(Artifact).filter(Artifact.workbench_id == workbench_id).all()
+        return [
+            {
+                "artifact_type": a.artifact_type.value if hasattr(a.artifact_type, "value") else str(a.artifact_type),
+                "content_json": a.content_json,
+            }
+            for a in artifacts
+        ]

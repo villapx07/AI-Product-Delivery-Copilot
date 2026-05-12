@@ -131,12 +131,15 @@ class QAScenariosPipeline(ModulePipeline):
     def parse_response(self, raw: Optional[dict]) -> list:
         if raw is None:
             return []
+        items = []
         if isinstance(raw, list):
-            return raw
-        for key in ("qa_scenarios", "scenarios", "tests", "items"):
-            if key in raw and isinstance(raw[key], list):
-                return raw[key]
-        return []
+            items = raw
+        else:
+            for key in ("qa_scenarios", "scenarios", "tests", "items"):
+                if key in raw and isinstance(raw[key], list):
+                    items = raw[key]
+                    break
+        return [{"id": f"qa-{i}", **item} for i, item in enumerate(items) if isinstance(item, dict)]
 
 
 class AnalyticsPipeline(ModulePipeline):
@@ -151,9 +154,12 @@ class AnalyticsPipeline(ModulePipeline):
     def parse_response(self, raw: Optional[dict]) -> list:
         if raw is None:
             return []
+        items = []
         if isinstance(raw, list):
-            return raw
-        return raw.get("analytics_events", raw.get("events", []))
+            items = raw
+        else:
+            items = raw.get("analytics_events", raw.get("events", []))
+        return [{"id": f"ev-{i}", **item} for i, item in enumerate(items) if isinstance(item, dict)]
 
 
 class RisksPipeline(ModulePipeline):
@@ -168,9 +174,12 @@ class RisksPipeline(ModulePipeline):
     def parse_response(self, raw: Optional[dict]) -> list:
         if raw is None:
             return []
+        items = []
         if isinstance(raw, list):
-            return raw
-        return raw.get("risks", raw.get("risks_list", []))
+            items = raw
+        else:
+            items = raw.get("risks", raw.get("risks_list", []))
+        return [{"id": f"risk-{i}", **item} for i, item in enumerate(items) if isinstance(item, dict)]
 
 
 class ReviewerPipeline(ModulePipeline):
@@ -184,9 +193,12 @@ class ReviewerPipeline(ModulePipeline):
     def parse_response(self, raw: Optional[dict]) -> list:
         if raw is None:
             return []
+        items = []
         if isinstance(raw, list):
-            return raw
-        return raw.get("reviewer_items", raw.get("reviews", []))
+            items = raw
+        else:
+            items = raw.get("reviewer_items", raw.get("reviews", []))
+        return [{"id": f"rev-{i}", **item} for i, item in enumerate(items) if isinstance(item, dict)]
 
 
 # ── Registry map ─────────────────────────────────────────────────────────────
@@ -233,7 +245,7 @@ async def generate_single_module(
 
     # Check prerequisites
     for dep in pipeline.needs_upstream:
-        if not upstream.get(dep):
+        if dep not in upstream or upstream[dep] is None:
             yield {"event": "prerequisite_missing", "data": dep}
             return
 
