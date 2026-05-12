@@ -179,32 +179,36 @@ export function useWorkbench({ workbenchId, workbench, initialArtifacts = [] }: 
       let eventType = ''
       let dataLine = ''
       for (const line of lines) {
-        if (line.startsWith('event:')) eventType = line.slice(6).trim()
-        if (line.startsWith('data:')) dataLine = line.slice(5).trim()
-      }
-      if (!dataLine) continue
-      try {
-        const parsed = JSON.parse(dataLine)
-        if (eventType === 'prerequisite_missing') {
-          return { parsedData: null, error: `Generate ${parsed} first` }
+        if (line.startsWith('event:')) {
+          eventType = line.slice(6).trim()
+          continue  // move to next line to get the data: value
         }
-        if (eventType === 'error') {
-          return { parsedData: null, error: String(parsed) }
-        }
-        // module_data events carry {"user_stories": [...]} — extract by key match
-        if (eventType === 'module_data' && parsed && typeof parsed === 'object') {
-          for (const key of Object.keys(parsed)) {
-            if (moduleKey === key || moduleKey.includes(key) || key.includes(moduleKey)) {
-              return { parsedData: parsed[key], error: null }
+        if (!line.startsWith('data:')) continue
+        dataLine = line.slice(5).trim()
+        if (!dataLine || !eventType) continue
+        try {
+          const parsed = JSON.parse(dataLine)
+          if (eventType === 'prerequisite_missing') {
+            return { parsedData: null, error: `Generate ${parsed} first` }
+          }
+          if (eventType === 'error') {
+            return { parsedData: null, error: String(parsed) }
+          }
+          // module_data events carry {"user_stories": [...]} — extract by key match
+          if (eventType === 'module_data' && parsed && typeof parsed === 'object') {
+            for (const key of Object.keys(parsed)) {
+              if (moduleKey === key || moduleKey.includes(key) || key.includes(moduleKey)) {
+                return { parsedData: parsed[key], error: null }
+              }
             }
           }
+          // Direct key lookup
+          if (parsed && typeof parsed === 'object' && moduleKey in parsed) {
+            return { parsedData: parsed[moduleKey], error: null }
+          }
+        } catch {
+          // skip non-JSON
         }
-        // Direct key lookup
-        if (parsed && typeof parsed === 'object' && moduleKey in parsed) {
-          return { parsedData: parsed[moduleKey], error: null }
-        }
-      } catch {
-        // skip non-JSON
       }
     }
 
